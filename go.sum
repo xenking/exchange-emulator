@@ -10,8 +10,6 @@ github.com/cristalhq/aconfig v0.16.7 h1:lpMlnh7R+PHTiMgriCm5INN8BeekRxwhw0I1IpJO
 github.com/cristalhq/aconfig v0.16.7/go.mod h1:NXaRp+1e6bkO4dJn+wZ71xyaihMDYPtCSvEhMTm/H3E=
 github.com/cristalhq/aconfig/aconfigyaml v0.16.1 h1:ghmzWFolCuja6BzBvHkNAn2Qsewu6xqdAXQyWnXjvZw=
 github.com/cristalhq/aconfig/aconfigyaml v0.16.1/go.mod h1:UgM0LkO4TKbC0s/oUP2p5POM6QiQwNvOFXostf6con0=
-github.com/cristalhq/atomix v0.7.1 h1:UNQ1IUvHnCNevhDraMxBnqapehFJaMYPcnhybBiQSeg=
-github.com/cristalhq/atomix v0.7.1/go.mod h1:L1fKIkad3KHKrUkK1L9Y7GDzgrdUwthr/KtYaGx4r0Q=
 github.com/dchest/siphash v1.1.0/go.mod h1:q+IRvb2gOSrUnYoPqHiyHXS0FOBBOdl6tONBlVnOnt4=
 github.com/dchest/siphash v1.2.2 h1:9DFz8tQwl9pTVt5iok/9zKyzA1Q6bRGiF3HPiEEVr9I=
 github.com/dchest/siphash v1.2.2/go.mod h1:q+IRvb2gOSrUnYoPqHiyHXS0FOBBOdl6tONBlVnOnt4=
