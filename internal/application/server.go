@@ -8,6 +8,8 @@ import (
 	"github.com/segmentio/encoding/json"
 	"github.com/valyala/fasthttp"
 	"github.com/xenking/websocket"
+
+	"github.com/xenking/exchange-emulator/models"
 )
 
 type Server struct {
@@ -42,28 +44,8 @@ func (s *Server) CloseConn(conn *websocket.Conn, err error) {
 	s.clients.Del(conn.ID())
 }
 
-type Operation uint8
-
-const (
-	OpExchangeStart Operation = iota + 1
-	OpExchangeStop
-	OpExchangeOffset
-
-	OpExchangeInfo
-	OpPrice
-
-	OpBalanceGet
-	OpBalanceSet
-
-	OpOrderCreate
-	OpOrderGet
-	OpOrderCancel
-
-	OpOrderUpdate
-)
-
 type op struct {
-	Operation Operation `json:"operation"`
+	Operation models.Operation `json:"operation"`
 }
 
 var ErrInvalidOperation = errors.New("invalid operation")
@@ -77,30 +59,30 @@ func (s *Server) OnData(c *websocket.Conn, _ bool, d []byte) {
 		return
 	}
 	switch o.Operation {
-	case OpPrice:
+	case models.OpPrice:
 		s.Exchange.Stop()
 		err = s.GetPrice(c, d)
-	case OpOrderCreate:
+	case models.OpOrderCreate:
 		s.Exchange.Stop()
 		err = s.CreateOrder(c, c.ID(), d)
-	case OpOrderCancel:
+	case models.OpOrderCancel:
 		s.Exchange.Stop()
 		err = s.CancelOrder(c, d)
-	case OpOrderGet:
+	case models.OpOrderGet:
 		err = s.GetOrder(c, d)
-	case OpExchangeInfo:
+	case models.OpExchangeInfo:
 		s.ExchangeInfo(c)
-	case OpBalanceGet:
+	case models.OpBalanceGet:
 		err = s.GetBalance(c, c.ID())
-	case OpBalanceSet:
+	case models.OpBalanceSet:
 		err = s.SetBalance(c, c.ID(), d)
-	case OpExchangeStart:
+	case models.OpExchangeStart:
 		s.Exchange.Start()
-	case OpExchangeStop:
+	case models.OpExchangeStop:
 		s.Exchange.Stop()
-	case OpExchangeOffset:
+	case models.OpExchangeOffset:
 		err = s.Exchange.Offset(d)
-	case OpOrderUpdate:
+	case models.OpOrderUpdate:
 		err = ErrInvalidOperation
 	}
 	if err != nil {
@@ -110,7 +92,7 @@ func (s *Server) OnData(c *websocket.Conn, _ bool, d []byte) {
 	}
 }
 
-func (s *Server) OnOrderUpdate(order *Order) {
+func (s *Server) OnOrderUpdate(order *models.Order) {
 	c, ok := s.clients.Get(order.UserID)
 	if !ok {
 		return
@@ -119,7 +101,7 @@ func (s *Server) OnOrderUpdate(order *Order) {
 	if !ok2 {
 		return
 	}
-	order.Op = OpOrderUpdate
+	order.Op = models.OpOrderUpdate
 	err := json.NewEncoder(conn).Encode(order)
 	if err != nil {
 		_, _ = conn.Write(NewError(err).Bytes())

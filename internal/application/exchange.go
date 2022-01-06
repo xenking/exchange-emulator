@@ -7,18 +7,20 @@ import (
 
 	"github.com/phuslu/log"
 	"github.com/segmentio/encoding/json"
+
+	"github.com/xenking/exchange-emulator/models"
 )
 
 type Exchange struct {
-	Transactions chan Transaction
+	Transactions chan transaction
 	lock         chan struct{}
 	run          uint32
 	offset       int64
 }
 
-type Transaction func(*ExchangeState) bool
+type transaction func(*models.ExchangeState) bool
 
-func NewExchange(ctx context.Context, file string, updateCallback Transaction) (*Exchange, error) {
+func NewExchange(ctx context.Context, file string, updateCallback transaction) (*Exchange, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
@@ -30,7 +32,7 @@ func NewExchange(ctx context.Context, file string, updateCallback Transaction) (
 		}
 	}()
 	e := &Exchange{
-		Transactions: make(chan Transaction),
+		Transactions: make(chan transaction),
 		lock:         make(chan struct{}),
 	}
 
@@ -39,10 +41,10 @@ func NewExchange(ctx context.Context, file string, updateCallback Transaction) (
 	return e, nil
 }
 
-func (e *Exchange) watcherLoop(ctx context.Context, updates <-chan *ExchangeState, cb Transaction) {
-	var offset int64
-	var state *ExchangeState
-	var states <-chan *ExchangeState
+func (e *Exchange) watcherLoop(ctx context.Context, updates <-chan *models.ExchangeState, cb transaction) {
+	var off int64
+	var state *models.ExchangeState
+	var states <-chan *models.ExchangeState
 	for {
 		select {
 		case <-ctx.Done():
@@ -52,14 +54,14 @@ func (e *Exchange) watcherLoop(ctx context.Context, updates <-chan *ExchangeStat
 			switch {
 			case states == nil && running == 1:
 				states = updates
-				offset = atomic.LoadInt64(&e.offset)
+				off = atomic.LoadInt64(&e.offset)
 			case states != nil && running == 0:
 				states = nil
 			}
 		case t := <-e.Transactions:
 			t(state)
 		case state = <-states:
-			if state.Unix < offset {
+			if state.Unix < off {
 				continue
 			}
 			if updated := cb(state); updated {
@@ -81,12 +83,12 @@ func (e *Exchange) Start() {
 	}
 }
 
-type Offset struct {
+type offset struct {
 	Offset int64 `json:"offset"`
 }
 
 func (e *Exchange) Offset(data []byte) error {
-	o := &Offset{}
+	o := &offset{}
 
 	if err := json.Unmarshal(data, o); err != nil {
 		return err
