@@ -1,6 +1,8 @@
 package config
 
 import (
+	"time"
+
 	"github.com/cristalhq/aconfig"
 	"github.com/cristalhq/aconfig/aconfigyaml"
 )
@@ -10,18 +12,22 @@ var ApplicationVersion string
 
 // Config is a structure for values of the environment variables.
 type Config struct {
-	App      ApplicationConfig
-	Log      *LoggerConfig
-	REST     RESTConfig
+	GracefulShutdownDelay time.Duration `default:"30s"`
+	ExchangeFile          string        `default:"./data/exchange.json"`
+	Commission            float64       `default:"0.1"`
+
+	App ApplicationConfig
+	Log LoggerConfig
+	WS  WSConfig
 }
 
 type ApplicationConfig struct {
-	Version          string `default:"v0.0.1"`
-	Name             string `default:"exchange-emulator"`
+	Version string `default:"v0.0.1"`
+	Name    string `default:"exchange-emulator"`
 }
 
-type RESTConfig struct {
-	Addr string `default:":8080"`
+type WSConfig struct {
+	Addr string `default:":8000"`
 }
 
 type LoggerConfig struct {

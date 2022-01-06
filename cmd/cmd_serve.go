@@ -7,10 +7,10 @@ import (
 
 	"github.com/cloudflare/tableflip"
 	"github.com/phuslu/log"
+	"github.com/xenking/decimal"
 
-	"github.com/xenking/exchange-emulator/api/server"
-	"github.com/xenking/exchange-emulator/api/server/api"
 	"github.com/xenking/exchange-emulator/config"
+	"github.com/xenking/exchange-emulator/internal/application"
 	"github.com/xenking/exchange-emulator/pkg/logger"
 )
 
@@ -21,15 +21,14 @@ func serveCmd(ctx context.Context, flags cmdFlags) error {
 	}
 	log.Debug().Msgf("%+v", cfg)
 
-	l := logger.New(cfg.Log)
+	l := logger.New(&cfg.Log)
 	logger.SetGlobal(l)
 	log.DefaultLogger = *logger.NewModule("global")
-
 
 	return serve(ctx, cfg)
 }
 
-func serve(ctx context.Context, cfg *config.Config, bot *api.Bot) error {
+func serve(ctx context.Context, cfg *config.Config) error {
 	upg, listerErr := tableflip.New(tableflip.Options{
 		UpgradeTimeout: cfg.GracefulShutdownDelay,
 	})
@@ -44,7 +43,9 @@ func serve(ctx context.Context, cfg *config.Config, bot *api.Bot) error {
 		upg.Stop()
 	}()
 
-	rs, err := serveREST(cfg, bot, upg)
+	core := application.NewCore(cfg.ExchangeFile, decimal.NewFromFloat(cfg.Commission))
+
+	_, err := serveWS(cfg, core, upg)
 	if err != nil {
 		return err
 	}
@@ -62,34 +63,27 @@ func serve(ctx context.Context, cfg *config.Config, bot *api.Bot) error {
 		os.Exit(1)
 	})
 
-	if rs != nil {
-		listerErr = rs.Shutdown()
-	}
-
-	return listerErr
+	return err
 }
 
-func serveREST(cfg *config.Config, bot *api.Bot, upg *tableflip.Upgrader) (*server.Server, error) {
-	rs, err := server.New(bot)
-	if err != nil {
-		return nil, err
-	}
+func serveWS(cfg *config.Config, core *application.Core, upg *tableflip.Upgrader) (*application.Server, error) {
+	ws := application.NewServer(core)
 
 	// Serve must be called before Ready
-	restListener, listenErr := upg.Listen("tcp", cfg.REST.Addr)
-	if listenErr != nil {
-		log.Error().Err(listenErr).Msg("can't listen")
+	listener, err := upg.Listen("tcp", cfg.WS.Addr)
+	if err != nil {
+		log.Error().Err(err).Msg("can't listen")
 
-		return nil, listenErr
+		return nil, err
 	}
 
 	// run gateway server
 	go func() {
-		if serveErr := rs.Serve(restListener); serveErr != nil {
+		if serveErr := ws.Serve(listener); serveErr != nil {
 			log.Error().Err(serveErr).Msg("rest server")
 		}
 	}()
 	log.Info().Msg("serving rest server")
 
-	return rs, nil
+	return ws, nil
 }
