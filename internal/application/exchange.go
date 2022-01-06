@@ -10,7 +10,6 @@ import (
 )
 
 type Exchange struct {
-	Symbol       string
 	Transactions chan Transaction
 	lock         chan struct{}
 	run          uint32
@@ -19,7 +18,7 @@ type Exchange struct {
 
 type Transaction func(*ExchangeState) bool
 
-func NewExchange(ctx context.Context, symbol, file string, cb Transaction) (*Exchange, error) {
+func NewExchange(ctx context.Context, file string, updateCallback Transaction) (*Exchange, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
@@ -31,12 +30,11 @@ func NewExchange(ctx context.Context, symbol, file string, cb Transaction) (*Exc
 		}
 	}()
 	e := &Exchange{
-		Symbol:       symbol,
 		Transactions: make(chan Transaction),
 		lock:         make(chan struct{}),
 	}
 
-	go e.watcherLoop(ctx, updates, cb)
+	go e.watcherLoop(ctx, updates, updateCallback)
 
 	return e, nil
 }

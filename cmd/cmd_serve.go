@@ -77,13 +77,13 @@ func serveWS(cfg *config.Config, core *application.Core, upg *tableflip.Upgrader
 		return nil, err
 	}
 
-	// run gateway server
+	// run ws server
 	go func() {
 		if serveErr := ws.Serve(listener); serveErr != nil {
-			log.Error().Err(serveErr).Msg("rest server")
+			log.Error().Err(serveErr).Msg("ws server")
 		}
 	}()
-	log.Info().Msg("serving rest server")
+	log.Info().Msg("serving ws server")
 
 	return ws, nil
 }

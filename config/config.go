@@ -13,8 +13,9 @@ var ApplicationVersion string
 // Config is a structure for values of the environment variables.
 type Config struct {
 	GracefulShutdownDelay time.Duration `default:"30s"`
-	ExchangeFile          string        `default:"./data/exchange.json"`
-	Commission            float64       `default:"0.1"`
+
+	ExchangeFile string  `default:"./data/exchange.json"`
+	Commission   float64 `default:"0.1"`
 
 	App ApplicationConfig
 	Log LoggerConfig

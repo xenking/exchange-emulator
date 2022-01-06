@@ -1,0 +1,11 @@
+app:
+  version: 0.1.0
+
+log:
+  level: debug
+
+ws:
+  addr: ":8000"
+
+exchange_file: "./data/exchange.json"
+commission: 0.1

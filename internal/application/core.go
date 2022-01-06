@@ -18,7 +18,6 @@ type Core struct {
 	UserBalances    *hashmap.HashMap // map[userID][]*Balance
 	Orders          *hashmap.HashMap // map[orderID]*Order
 
-	prices        *hashmap.HashMap // map[price]*Order
 	commission    decimal.Decimal
 	exchangeFile  string
 	orderSequence uint64
@@ -29,19 +28,20 @@ func NewCore(exchangeFile string, commission decimal.Decimal) *Core {
 		UserBalances: &hashmap.HashMap{},
 		Orders:       &hashmap.HashMap{},
 
-		prices:       &hashmap.HashMap{},
 		exchangeFile: exchangeFile,
 		commission:   commission,
 	}
 }
 
-func (c *Core) SetSymbolData(ctx context.Context, symbol, file string) (err error) {
-	c.Exchange, err = NewExchange(ctx, symbol, file, c.watch)
+func (c *Core) SetData(ctx context.Context, file string) (err error) {
+	c.Exchange, err = NewExchange(ctx, file, c.updateState)
 
 	return
 }
 
 func (c *Core) CurrState(symbol string) *ExchangeState {
+	// TODO: use symbol for multiple exchanges
+
 	var state *ExchangeState
 	wait := make(chan struct{})
 	c.Transactions <- func(s *ExchangeState) bool {
@@ -65,10 +65,11 @@ type SymbolPrice struct {
 }
 
 var (
-	ErrEmptySymbol  = errors.New("empty symbol")
-	ErrNoData       = errors.New("no data")
-	ErrUnknownUser  = errors.New("unknown user")
-	ErrEmptyBalance = errors.New("empty balance")
+	ErrEmptySymbol     = errors.New("empty symbol")
+	ErrNoData          = errors.New("no data")
+	ErrUnknownUser     = errors.New("unknown user")
+	ErrEmptyBalance    = errors.New("empty balance")
+	ErrNegativeBalance = errors.New("negative balance")
 )
 
 func (c *Core) GetPrice(w io.Writer, data []byte) error {
@@ -117,6 +118,7 @@ func (c *Core) GetBalance(w io.Writer, user uint64) error {
 }
 
 type Order struct {
+	Op       Operation       `json:"operation,omitempty"`
 	Symbol   string          `json:"symbol"`
 	ID       string          `json:"clientOrderId"`
 	Type     string          `json:"type"`
@@ -126,7 +128,7 @@ type Order struct {
 	Quantity decimal.Decimal `json:"origQty"`
 	Total    decimal.Decimal `json:"total"`
 	OrderID  uint64          `json:"orderId"`
-	UserID   uint64          `json:"userId"`
+	UserID   uint64          `json:"userId,omitempty"`
 }
 
 type OrderStatus string
@@ -156,7 +158,6 @@ func (c *Core) CreateOrder(w io.Writer, user uint64, data []byte) error {
 		o.Total = o.Quantity.Div(o.Price)
 	}
 	c.Orders.Set(o.ID, o)
-	c.prices.Set(o.Price, o)
 
 	if err := c.updateBalance(o); err != nil {
 		return err
@@ -166,12 +167,12 @@ func (c *Core) CreateOrder(w io.Writer, user uint64, data []byte) error {
 	return err
 }
 
-type OrderID struct {
+type orderID struct {
 	ID string `json:"clientOrderId"`
 }
 
 func (c *Core) GetOrder(w io.Writer, data []byte) error {
-	o := &OrderID{}
+	o := &orderID{}
 	if err := json.Unmarshal(data, o); err != nil {
 		return err
 	}
@@ -185,7 +186,7 @@ func (c *Core) GetOrder(w io.Writer, data []byte) error {
 }
 
 func (c *Core) CancelOrder(w io.Writer, data []byte) error {
-	req := &OrderID{}
+	req := &orderID{}
 	if err := json.Unmarshal(data, req); err != nil {
 		return err
 	}
@@ -197,7 +198,6 @@ func (c *Core) CancelOrder(w io.Writer, data []byte) error {
 	if !ok2 {
 		return ErrNoData
 	}
-	c.prices.Del(order.Price)
 	c.Orders.Del(order.Price)
 	order.Status = OrderStatusCanceled
 
@@ -210,19 +210,22 @@ func (c *Core) CancelOrder(w io.Writer, data []byte) error {
 	return err
 }
 
-func (c *Core) watch(state *ExchangeState) (updated bool) {
-	for kv := range c.prices.Iter() {
-		price, ok := kv.Key.(decimal.Decimal)
+func (c *Core) updateState(state *ExchangeState) (updated bool) {
+	for kv := range c.Orders.Iter() {
+		order, ok := kv.Value.(*Order)
 		if !ok {
 			continue
 		}
-		if price.LessThan(state.Low) || price.GreaterThan(state.High) {
+		if order.Price.LessThan(state.Low) || order.Price.GreaterThan(state.High) {
 			continue
 		}
-		order, ok2 := kv.Value.(*Order)
-		if !ok2 {
-			continue
+		if order.Side == OrderSideBuy && order.Total.GreaterThan(state.AssetVolume) ||
+			order.Side == OrderSideSell && order.Total.GreaterThan(state.BaseVolume) {
+			log.Panic().Str("side", order.Side).Str("total", order.Total.String()).
+				Str("asset", state.AssetVolume.String()).Str("base", state.BaseVolume.String()).
+				Int64("ts", state.Unix).Msg("can't close order in one kline. Need to use PARTIAL_FILLED")
 		}
+
 		updated = true
 		order.Status = OrderStatusFilled
 		if err := c.updateBalance(order); err != nil {
@@ -230,9 +233,10 @@ func (c *Core) watch(state *ExchangeState) (updated bool) {
 
 			continue
 		}
-		c.CompleteHandler(order)
+		if c.CompleteHandler != nil {
+			c.CompleteHandler(order)
+		}
 		c.Orders.Del(order.ID)
-		c.prices.Del(order.Price)
 	}
 
 	return
@@ -270,6 +274,8 @@ func (c *Core) updateBalance(o *Order) error {
 			Free:   zero,
 			Locked: zero,
 		}
+		balances = append(balances, input)
+		c.UserBalances.Set(o.UserID, balances)
 	}
 	if output == nil {
 		output = &Balance{
@@ -277,18 +283,26 @@ func (c *Core) updateBalance(o *Order) error {
 			Free:   zero,
 			Locked: zero,
 		}
+		balances = append(balances, output)
+		c.UserBalances.Set(o.UserID, balances)
 	}
 
 	switch o.Status {
 	case OrderStatusNew:
 		input.Free = input.Free.Sub(o.Total)
 		input.Locked = input.Locked.Add(o.Total)
+		if input.Free.IsNegative() {
+			return ErrNegativeBalance
+		}
 	case OrderStatusCanceled:
 		input.Locked = input.Locked.Sub(o.Total)
 		input.Free = input.Free.Add(o.Total)
 	case OrderStatusFilled:
 		input.Locked = input.Locked.Sub(o.Total)
 		output.Free = output.Free.Add(o.Quantity.Sub(o.Quantity.Mul(c.commission)))
+		if input.Locked.IsNegative() {
+			return ErrNegativeBalance
+		}
 	}
 
 	return nil

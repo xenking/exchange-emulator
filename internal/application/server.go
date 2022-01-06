@@ -42,47 +42,51 @@ func (s *Server) CloseConn(conn *websocket.Conn, err error) {
 	s.clients.Del(conn.ID())
 }
 
-type Op uint8
+type Operation uint8
 
 const (
-	OpUnknown Op = iota
-	OpExchangeStart
+	OpExchangeStart Operation = iota + 1
 	OpExchangeStop
 	OpExchangeOffset
+
 	OpExchangeInfo
 	OpPrice
+
 	OpBalanceGet
 	OpBalanceSet
-	OpCreateOrder
-	OpGetOrder
-	OpCancelOrder
+
+	OpOrderCreate
+	OpOrderGet
+	OpOrderCancel
+
+	OpOrderUpdate
 )
 
-type Operation struct {
-	Op Op `json:"operation"`
+type op struct {
+	Operation Operation `json:"operation"`
 }
 
-var ErrUnknownOperation = errors.New("unknown operation")
+var ErrInvalidOperation = errors.New("invalid operation")
 
 func (s *Server) OnData(c *websocket.Conn, _ bool, d []byte) {
-	o := &Operation{}
+	o := &op{}
 	err := json.Unmarshal(d, o)
 	if err != nil {
 		_, _ = c.Write(NewError(err).Bytes())
 
 		return
 	}
-	switch o.Op {
+	switch o.Operation {
 	case OpPrice:
 		s.Exchange.Stop()
 		err = s.GetPrice(c, d)
-	case OpCreateOrder:
+	case OpOrderCreate:
 		s.Exchange.Stop()
 		err = s.CreateOrder(c, c.ID(), d)
-	case OpCancelOrder:
+	case OpOrderCancel:
 		s.Exchange.Stop()
 		err = s.CancelOrder(c, d)
-	case OpGetOrder:
+	case OpOrderGet:
 		err = s.GetOrder(c, d)
 	case OpExchangeInfo:
 		s.ExchangeInfo(c)
@@ -96,8 +100,8 @@ func (s *Server) OnData(c *websocket.Conn, _ bool, d []byte) {
 		s.Exchange.Stop()
 	case OpExchangeOffset:
 		err = s.Exchange.Offset(d)
-	case OpUnknown:
-		err = ErrUnknownOperation
+	case OpOrderUpdate:
+		err = ErrInvalidOperation
 	}
 	if err != nil {
 		_, _ = c.Write(NewError(err).Bytes())
@@ -115,6 +119,7 @@ func (s *Server) OnOrderUpdate(order *Order) {
 	if !ok2 {
 		return
 	}
+	order.Op = OpOrderUpdate
 	err := json.NewEncoder(conn).Encode(order)
 	if err != nil {
 		_, _ = conn.Write(NewError(err).Bytes())
