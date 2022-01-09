@@ -7,6 +7,7 @@ require (
 	github.com/cornelk/hashmap v1.0.1
 	github.com/cristalhq/aconfig v0.16.7
 	github.com/cristalhq/aconfig/aconfigyaml v0.16.1
+	github.com/goccy/go-reflect v1.1.0
 	github.com/phuslu/log v1.0.75
 	github.com/pkg/errors v0.9.1
 	github.com/segmentio/encoding v0.3.2

@@ -43,12 +43,24 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		upg.Stop()
 	}()
 
-	core := application.NewCore(cfg.ExchangeFile, decimal.NewFromFloat(cfg.Commission))
+	core := application.NewCore(cfg.ExchangeInfoFile, decimal.NewFromFloat(cfg.Commission))
+	wss := application.NewServer(ctx, core, cfg.ExchangeDataFile)
 
-	_, err := serveWS(cfg, core, upg)
+	// Serve must be called before Ready
+	listener, err := upg.Listen("tcp", cfg.WS.Addr)
 	if err != nil {
+		log.Error().Err(err).Msg("can't listen")
+
 		return err
 	}
+
+	// run wss server
+	go func() {
+		log.Info().Msg("serving wss server")
+		if serveErr := wss.Serve(listener); serveErr != nil {
+			log.Error().Err(serveErr).Msg("wss server")
+		}
+	}()
 
 	log.Info().Msg("service ready")
 	if upgErr := upg.Ready(); upgErr != nil {
@@ -64,26 +76,4 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	})
 
 	return err
-}
-
-func serveWS(cfg *config.Config, core *application.Core, upg *tableflip.Upgrader) (*application.Server, error) {
-	ws := application.NewServer(core)
-
-	// Serve must be called before Ready
-	listener, err := upg.Listen("tcp", cfg.WS.Addr)
-	if err != nil {
-		log.Error().Err(err).Msg("can't listen")
-
-		return nil, err
-	}
-
-	// run ws server
-	go func() {
-		if serveErr := ws.Serve(listener); serveErr != nil {
-			log.Error().Err(serveErr).Msg("ws server")
-		}
-	}()
-	log.Info().Msg("serving ws server")
-
-	return ws, nil
 }

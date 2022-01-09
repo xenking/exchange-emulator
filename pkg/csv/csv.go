@@ -4,10 +4,11 @@ package csv
 import (
 	"encoding"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/goccy/go-reflect"
 )
 
 const tagName = "csv"

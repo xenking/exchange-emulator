@@ -63,10 +63,10 @@ func (s *ExchangeState) UnmarshalCSV(_, v []string) error {
 	return err
 }
 
-type Operation uint8
+type Op uint8
 
 const (
-	OpExchangeStart Operation = iota + 1
+	OpExchangeStart Op = iota + 1
 	OpExchangeStop
 	OpExchangeOffset
 
@@ -83,9 +83,15 @@ const (
 	OpOrderUpdate
 )
 
-type SymbolPrice struct {
+type PriceReq struct {
+	Operation
 	Symbol string          `json:"symbol"`
 	Price  decimal.Decimal `json:"price"`
+}
+
+type BalancesReq struct {
+	Operation
+	Balances []*Balance `json:"balances"`
 }
 
 type Balance struct {
@@ -95,7 +101,7 @@ type Balance struct {
 }
 
 type Order struct {
-	Op       Operation       `json:"operation,omitempty"`
+	Operation
 	Symbol   string          `json:"symbol"`
 	ID       string          `json:"clientOrderId"`
 	Type     string          `json:"type"`
@@ -120,3 +126,17 @@ const (
 	OrderSideBuy  = "BUY"
 	OrderSideSell = "SELL"
 )
+
+type Operation struct {
+	Op Op `json:"operation,omitempty"`
+}
+
+type OffsetReq struct {
+	Operation
+	Offset int64 `json:"offset"`
+}
+
+type OrderIDReq struct {
+	Operation
+	ID string `json:"clientOrderId"`
+}

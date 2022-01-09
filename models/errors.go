@@ -1,6 +1,4 @@
-package application
-
-import "github.com/segmentio/encoding/json"
+package models
 
 type Error struct {
 	Err error `json:"error"`
@@ -15,7 +13,9 @@ func (e Error) Error() string {
 }
 
 func (e Error) Bytes() []byte {
-	b, _ := json.Marshal(&e)
+	b := append([]byte{}, `{"error":"`...)
+	b = append(b, e.Err.Error()...)
+	b = append(b, `"}`...)
 
 	return b
 }

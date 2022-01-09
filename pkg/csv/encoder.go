@@ -7,10 +7,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"reflect"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/goccy/go-reflect"
 )
 
 // Marshaler is the interface implemented by types that can marshal themselves

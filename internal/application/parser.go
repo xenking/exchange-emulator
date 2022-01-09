@@ -20,19 +20,9 @@ func ParseCSV(ctx context.Context, r io.ReadCloser) (<-chan *models.ExchangeStat
 		defer close(errc)
 		defer r.Close()
 
-		d := csv.NewDecoder(r)
-		row, err := d.ReadLine()
-		if err != nil {
-			errc <- err
-
-			return
-		}
-		if _, err = d.DecodeHeader(row); err != nil {
-			errc <- err
-
-			return
-		}
-
+		d := csv.NewDecoder(r).Header(false)
+		var row string
+		var err error
 		for {
 			row, err = d.ReadLine()
 			if err != nil {
@@ -67,18 +57,21 @@ func ParseCSV(ctx context.Context, r io.ReadCloser) (<-chan *models.ExchangeStat
 
 var (
 	exchangeInfo     []byte
+	exchangeInfoErr  error
 	exchangeInfoOnce sync.Once
 )
 
-func LoadExchangeInfo(filename string) []byte {
+func LoadExchangeInfo(filename string) ([]byte, error) {
 	exchangeInfoOnce.Do(func() {
-		f, fErr := os.Open(filename)
-		if fErr != nil {
+		f, err := os.Open(filename)
+		if err != nil {
+			exchangeInfoErr = err
+
 			return
 		}
+		defer f.Close()
 		exchangeInfo, _ = io.ReadAll(f)
-		f.Close()
 	})
 
-	return exchangeInfo
+	return exchangeInfo, exchangeInfoErr
 }

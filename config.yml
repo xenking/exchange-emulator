@@ -7,5 +7,6 @@ log:
 ws:
   addr: ":8000"
 
-exchange_file: "./data/exchange.json"
+exchange_data_file: "./data/Binance_ETHUSDT_1h.csv"
+exchange_info_file: "./data/exchange.json"
 commission: 0.1

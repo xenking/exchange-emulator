@@ -8,9 +8,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/goccy/go-reflect"
 )
 
 const (
@@ -298,7 +299,7 @@ func (d *Decoder) unmarshal(val reflect.Value, line string) error {
 	var merged string
 	for _, v := range tokens {
 		// unquote and merge multiple tokens, when separated
-		switch true {
+		switch {
 		case len(v) == 1 && strings.HasPrefix(v, Wrapper):
 			// (1) .. ,",", .. (2) .. ," text,", ..
 			if merged == "" {
@@ -331,10 +332,6 @@ func (d *Decoder) unmarshal(val reflect.Value, line string) error {
 	}
 	tokens = combined
 
-	if len(tokens) != len(d.headerKeys) {
-		return &DecodeError{d.lineNo, 0, "number of fields does not match header", nil}
-	}
-
 	// Load value from interface, but only if the result will be
 	// usefully addressable.
 	val = derefValue(val)
@@ -350,6 +347,10 @@ func (d *Decoder) unmarshal(val reflect.Value, line string) error {
 		if pv.CanInterface() && pv.Type().Implements(unmarshalerType) {
 			return pv.Interface().(Unmarshaler).UnmarshalCSV(d.headerKeys, tokens)
 		}
+	}
+
+	if len(tokens) != len(d.headerKeys) {
+		return &DecodeError{d.lineNo, 0, "number of fields does not match header", nil}
 	}
 
 	// map struct fields

@@ -14,8 +14,9 @@ var ApplicationVersion string
 type Config struct {
 	GracefulShutdownDelay time.Duration `default:"30s"`
 
-	ExchangeFile string  `default:"./data/exchange.json"`
-	Commission   float64 `default:"0.1"`
+	ExchangeDataFile string
+	ExchangeInfoFile string  `default:"./data/exchange.json"`
+	Commission       float64 `default:"0.1"`
 
 	App ApplicationConfig
 	Log LoggerConfig

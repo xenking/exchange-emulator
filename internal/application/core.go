@@ -15,10 +15,10 @@ import (
 )
 
 type Core struct {
-	*Exchange
-	CompleteHandler func(order *models.Order)
-	UserBalances    *hashmap.HashMap // map[userID][]*Balance
-	Orders          *hashmap.HashMap // map[orderID]*Order
+	UserBalances *hashmap.HashMap // map[userID][]*Balance
+	Exchanges    *hashmap.HashMap // map[userID]*Exchange
+	Orders       *hashmap.HashMap // map[OrderIDReq]*Order
+	callback     func(order *models.Order)
 
 	commission    decimal.Decimal
 	exchangeFile  string
@@ -29,24 +29,40 @@ func NewCore(exchangeFile string, commission decimal.Decimal) *Core {
 	return &Core{
 		UserBalances: &hashmap.HashMap{},
 		Orders:       &hashmap.HashMap{},
+		Exchanges:    &hashmap.HashMap{},
 
 		exchangeFile: exchangeFile,
 		commission:   commission,
 	}
 }
 
-func (c *Core) SetData(ctx context.Context, file string) (err error) {
-	c.Exchange, err = NewExchange(ctx, file, c.updateState)
-
-	return
+func (c *Core) SetCallback(cb func(order *models.Order)) {
+	c.callback = cb
 }
 
-func (c *Core) CurrState(symbol string) *models.ExchangeState {
-	// TODO: use symbol for multiple exchanges
+func (c *Core) AddExchange(ctx context.Context, user uint64, file string) error {
+	exchange, err := NewExchange(ctx, file, c.updateState)
+	if err != nil {
+		return err
+	}
+	c.Exchanges.Set(user, exchange)
+
+	return nil
+}
+
+func (c *Core) CurrState(user uint64) *models.ExchangeState {
+	ex, ok := c.Exchanges.Get(user)
+	if !ok {
+		return nil
+	}
+	exchange, ok2 := ex.(*Exchange)
+	if !ok2 {
+		return nil
+	}
 
 	var state *models.ExchangeState
 	wait := make(chan struct{})
-	c.Transactions <- func(s *models.ExchangeState) bool {
+	exchange.transactions <- func(s *models.ExchangeState) bool {
 		state = s
 		close(wait)
 
@@ -57,8 +73,14 @@ func (c *Core) CurrState(symbol string) *models.ExchangeState {
 	return state
 }
 
-func (c *Core) ExchangeInfo(w io.Writer) {
-	_, _ = w.Write(LoadExchangeInfo(c.exchangeFile))
+func (c *Core) ExchangeInfo(w io.Writer) error {
+	buf, err := LoadExchangeInfo(c.exchangeFile)
+	if err != nil {
+		return err
+	}
+	_, _ = w.Write(buf)
+
+	return nil
 }
 
 var (
@@ -69,33 +91,37 @@ var (
 	ErrNegativeBalance = errors.New("negative balance")
 )
 
-func (c *Core) GetPrice(w io.Writer, data []byte) error {
-	r := &models.SymbolPrice{}
-	if err := json.Unmarshal(data, r); err != nil {
+func (c *Core) GetPrice(w io.Writer, user uint64, data []byte) error {
+	req := &models.PriceReq{}
+	if err := json.Unmarshal(data, req); err != nil {
 		return err
 	}
-	if r.Symbol == "" {
+	if req.Symbol == "" {
 		return ErrEmptySymbol
 	}
-	state := c.CurrState(r.Symbol)
+	state := c.CurrState(user)
 	if state == nil {
 		return ErrNoData
 	}
-	r.Price = state.Close
-	err := json.NewEncoder(w).Encode(r)
+	req.Price = state.Close
+	req.Op = 0
+	log.Debug().Uint64("user", user).Str("symbol", req.Symbol).Float64("price", req.Price.InexactFloat64()).Msg("")
+	err := json.NewEncoder(w).Encode(req)
 
 	return err
 }
 
 func (c *Core) SetBalance(w io.Writer, user uint64, data []byte) error {
-	var bb []*models.Balance
-	if err := json.Unmarshal(data, &bb); err != nil {
+	req := &models.BalancesReq{}
+	if err := json.Unmarshal(data, req); err != nil {
 		return err
 	}
-	c.UserBalances.Set(user, bb)
-	_, _ = w.Write(data)
+	c.UserBalances.Set(user, req.Balances)
+	req.Op = 0
+	log.Debug().Uint64("user", user).RawJSON("data", data).Msg("Balance set")
+	err := json.NewEncoder(w).Encode(req)
 
-	return nil
+	return err
 }
 
 func (c *Core) GetBalance(w io.Writer, user uint64) error {
@@ -109,34 +135,33 @@ func (c *Core) GetBalance(w io.Writer, user uint64) error {
 }
 
 func (c *Core) CreateOrder(w io.Writer, user uint64, data []byte) error {
-	o := &models.Order{}
-	if err := json.Unmarshal(data, o); err != nil {
+	order := &models.Order{}
+	if err := json.Unmarshal(data, order); err != nil {
 		return err
 	}
-	o.UserID = user
-	o.OrderID = atomic.AddUint64(&c.orderSequence, 1)
-	o.Status = models.OrderStatusNew
-	if o.Side == models.OrderSideBuy {
-		o.Total = o.Price.Mul(o.Quantity)
+	order.UserID = user
+	order.OrderID = atomic.AddUint64(&c.orderSequence, 1)
+	order.Status = models.OrderStatusNew
+	if order.Side == models.OrderSideBuy {
+		order.Total = order.Price.Mul(order.Quantity)
 	} else {
-		o.Total = o.Quantity.Div(o.Price)
+		order.Total = order.Quantity.Div(order.Price)
 	}
-	c.Orders.Set(o.ID, o)
+	order.Operation.Op = 0
 
-	if err := c.updateBalance(o); err != nil {
+	if err := c.updateBalance(order); err != nil {
 		return err
 	}
-	err := json.NewEncoder(w).Encode(o)
+	c.Orders.Set(order.ID, order)
+	log.Debug().Str("order", order.ID).Uint64("user", order.UserID).Str("symbol", order.Symbol).
+		Str("side", order.Side).Msg("Order created")
+	err := json.NewEncoder(w).Encode(order)
 
 	return err
 }
 
-type orderID struct {
-	ID string `json:"clientOrderId"`
-}
-
 func (c *Core) GetOrder(w io.Writer, data []byte) error {
-	o := &orderID{}
+	o := &models.OrderIDReq{}
 	if err := json.Unmarshal(data, o); err != nil {
 		return err
 	}
@@ -150,7 +175,7 @@ func (c *Core) GetOrder(w io.Writer, data []byte) error {
 }
 
 func (c *Core) CancelOrder(w io.Writer, data []byte) error {
-	req := &orderID{}
+	req := &models.OrderIDReq{}
 	if err := json.Unmarshal(data, req); err != nil {
 		return err
 	}
@@ -168,7 +193,8 @@ func (c *Core) CancelOrder(w io.Writer, data []byte) error {
 	if err := c.updateBalance(order); err != nil {
 		return err
 	}
-
+	log.Debug().Str("order", order.ID).Uint64("user", order.UserID).Str("symbol", order.Symbol).
+		Str("side", order.Side).Msg("Order canceled")
 	err := json.NewEncoder(w).Encode(order)
 
 	return err
@@ -192,18 +218,20 @@ func (c *Core) updateState(state *models.ExchangeState) (updated bool) {
 
 		updated = true
 		order.Status = models.OrderStatusFilled
+		log.Debug().Str("order", order.ID).Uint64("user", order.UserID).Str("symbol", order.Symbol).
+			Str("side", order.Side).Msg("Order filled")
 		if err := c.updateBalance(order); err != nil {
 			log.Error().Err(err).Str("order", order.ID).Msg("can't update balance")
 
 			continue
 		}
-		if c.CompleteHandler != nil {
-			c.CompleteHandler(order)
+		if c.callback != nil {
+			c.callback(order)
 		}
 		c.Orders.Del(order.ID)
 	}
 
-	return
+	return updated
 }
 
 var zero = decimal.NewFromInt(0)
@@ -268,6 +296,38 @@ func (c *Core) updateBalance(o *models.Order) error {
 			return ErrNegativeBalance
 		}
 	}
+	log.Info().Uint64("user", o.UserID).
+		Str("base_asset", input.Asset).Float64("base_free", input.Free.InexactFloat64()).Float64("base_locked", input.Locked.InexactFloat64()).
+		Str("quote_asset", output.Asset).Float64("quote_free", output.Free.InexactFloat64()).Float64("quote_locked", output.Locked.InexactFloat64()).
+		Msg("Balance updated")
 
 	return nil
+}
+
+func (c *Core) UserExchange(user uint64) *Exchange {
+	ex, ok := c.Exchanges.Get(user)
+	if !ok {
+		return nil
+	}
+	exchange, ok2 := ex.(*Exchange)
+	if !ok2 {
+		return nil
+	}
+
+	return exchange
+}
+
+func (c *Core) DeleteExchange(user uint64) {
+	c.UserBalances.Del(user)
+
+	ex, ok := c.Exchanges.Get(user)
+	if !ok {
+		return
+	}
+	exchange, ok2 := ex.(*Exchange)
+	if !ok2 {
+		return
+	}
+	exchange.Close()
+	log.Debug().Uint64("user", user).Msg("Exchange deleted")
 }
