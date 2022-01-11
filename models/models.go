@@ -127,21 +127,8 @@ const (
 	OrderSideSell = "SELL"
 )
 
-type WSOp interface {
-	GetOp() Op
-	SetOp(Op)
-}
-
 type Operation struct {
 	Op Op `json:"operation,omitempty"`
-}
-
-func (o Operation) GetOp() Op {
-	return o.Op
-}
-
-func (o *Operation) SetOp(op Op) {
-	o.Op = op
 }
 
 type OffsetReq struct {
