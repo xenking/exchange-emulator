@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package server.api;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+option go_package = "github.com/xenking/exchange-emulator/api/proto;api";
+
+service Exchange {
+  rpc StartExchange(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  rpc StopExchange(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  rpc SetOffsetExchange(OffsetExchangeRequest) returns (google.protobuf.Empty);
+}
+
+message OffsetExchangeRequest {
+  int64 offset = 1;
+}
+
+service Info {
+  rpc GetExchangeInfo(google.protobuf.Empty) returns (google.protobuf.Struct);
+
+  rpc GetPrice(GetPriceRequest) returns (GetPriceResponse);
+}
+
+message GetPriceRequest {
+  string symbol = 1;
+}
+
+message GetPriceResponse {
+  string price = 1;
+}
+
+service User {
+  rpc GetBalance(google.protobuf.Empty) returns (Balances);
+
+  rpc SetBalance(Balances) returns (google.protobuf.Empty);
+
+  rpc CreateOrder(Order) returns (Order);
+
+  rpc GetOrder(OrderRequest) returns (Order);
+
+  rpc DeleteOrder(OrderRequest) returns (Order);
+}
+
+message Balances {
+  repeated Balance data = 1;
+}
+
+message Balance {
+  string asset = 1;
+  string free = 2 ;
+  string locked = 3;
+}
+
+enum OrderType {
+  LIMIT = 0;
+  MARKET = 1;
+}
+
+enum OrderSide {
+  BUY = 0;
+  SELL = 1;
+}
+
+enum OrderStatus {
+  NEW = 0;
+  PARTIALLY_FILLED = 1;
+  FILLED = 2;
+  CANCELED = 3;
+  PENDING_CANCEL = 4;
+  REJECTED = 5;
+  EXPIRED = 6;
+}
+
+message Order {
+  string id = 1;
+  string symbol = 2;
+  OrderSide side = 3;
+  OrderType type = 4;
+  string price = 5;
+  string quantity = 6;
+  string total = 7
+  [(google.api.field_behavior) = OUTPUT_ONLY];
+  OrderStatus status = 8
+  [(google.api.field_behavior) = OUTPUT_ONLY];
+  uint64 order_id = 9
+  [(google.api.field_behavior) = OUTPUT_ONLY];
+  string user_id = 10
+  [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+message OrderRequest {
+  string id = 1;
+}

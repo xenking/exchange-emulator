@@ -8,8 +8,8 @@ import (
 	"syscall"
 
 	"github.com/cristalhq/aconfig"
+	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
-	"github.com/pkg/errors"
 )
 
 func main() {

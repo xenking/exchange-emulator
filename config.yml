@@ -5,7 +5,11 @@ log:
   level: debug
 
 ws:
-  addr: ":8000"
+  addr: ":8081"
+
+grpc:
+  addr: ":8080"
+  disable_auth: false
 
 exchange_data_file: "./data/Binance_ETHUSDT_1h.csv"
 exchange_info_file: "./data/exchange.json"

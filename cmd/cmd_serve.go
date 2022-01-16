@@ -8,9 +8,12 @@ import (
 	"github.com/cloudflare/tableflip"
 	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
+	"google.golang.org/grpc/grpclog"
 
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/internal/application"
+	"github.com/xenking/exchange-emulator/internal/server"
+	"github.com/xenking/exchange-emulator/internal/ws"
 	"github.com/xenking/exchange-emulator/pkg/logger"
 )
 
@@ -24,6 +27,8 @@ func serveCmd(ctx context.Context, flags cmdFlags) error {
 	l := logger.New(&cfg.Log)
 	logger.SetGlobal(l)
 	log.DefaultLogger = *logger.NewModule("global")
+	glog := logger.NewModule("grpc")
+	grpclog.SetLoggerV2(glog.Grpc(glog.Context))
 
 	return serve(ctx, cfg)
 }
@@ -43,11 +48,20 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		upg.Stop()
 	}()
 
+	wss := ws.New(ctx)
 	core := application.NewCore(cfg.ExchangeInfoFile, decimal.NewFromFloat(cfg.Commission))
-	wss := application.NewServer(ctx, core, cfg.ExchangeDataFile)
+	core.OnOrderUpdate(wss.OnOrderUpdate)
+	srv := server.New(core, cfg.GRPC, cfg.ExchangeDataFile)
 
 	// Serve must be called before Ready
-	listener, err := upg.Listen("tcp", cfg.WS.Addr)
+	wssListener, err := upg.Listen("tcp", cfg.WS.Addr)
+	if err != nil {
+		log.Error().Err(err).Msg("can't listen")
+
+		return err
+	}
+
+	grpcListener, err := upg.Listen("tcp", cfg.GRPC.Addr)
 	if err != nil {
 		log.Error().Err(err).Msg("can't listen")
 
@@ -57,8 +71,16 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	// run wss server
 	go func() {
 		log.Info().Msg("serving wss server")
-		if serveErr := wss.Serve(listener); serveErr != nil {
+		if serveErr := wss.Serve(wssListener); serveErr != nil {
 			log.Error().Err(serveErr).Msg("wss server")
+		}
+	}()
+
+	// run grpc server
+	go func() {
+		log.Info().Msg("serving grpc server")
+		if serveErr := srv.Serve(grpcListener); serveErr != nil {
+			log.Error().Err(serveErr).Msg("grpc server")
 		}
 	}()
 

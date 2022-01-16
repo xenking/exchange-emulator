@@ -18,9 +18,10 @@ type Config struct {
 	ExchangeInfoFile string  `default:"./data/exchange.json"`
 	Commission       float64 `default:"0.1"`
 
-	App ApplicationConfig
-	Log LoggerConfig
-	WS  WSConfig
+	App  ApplicationConfig
+	Log  LoggerConfig
+	WS   WSConfig
+	GRPC GRPCConfig
 }
 
 type ApplicationConfig struct {
@@ -30,6 +31,11 @@ type ApplicationConfig struct {
 
 type WSConfig struct {
 	Addr string `default:":8000"`
+}
+
+type GRPCConfig struct {
+	Addr        string `default:"8000"`
+	DisableAuth bool   `default:"false"`
 }
 
 type LoggerConfig struct {

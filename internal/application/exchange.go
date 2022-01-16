@@ -2,12 +2,13 @@ package application
 
 import (
 	"context"
+	"os"
+	"sync"
 	"sync/atomic"
 
 	"github.com/phuslu/log"
 	"github.com/segmentio/encoding/json"
 
-	"github.com/xenking/exchange-emulator/models"
 	"github.com/xenking/exchange-emulator/pkg/rfile"
 )
 
@@ -19,7 +20,7 @@ type Exchange struct {
 	run          uint32
 }
 
-type transaction func(*models.ExchangeState) bool
+type transaction func(*ExchangeState) bool
 
 func NewExchange(ctx context.Context, file string, cb transaction) (*Exchange, error) {
 	e := &Exchange{
@@ -45,11 +46,11 @@ func (e *Exchange) initData(ctx context.Context, file string, cb transaction) er
 	return nil
 }
 
-func (e *Exchange) dataLoop(ctx context.Context, data <-chan *models.ExchangeState, cb transaction) {
+func (e *Exchange) dataLoop(ctx context.Context, data <-chan *ExchangeState, cb transaction) {
 	var off int64
 	var opened bool
-	var state *models.ExchangeState
-	var states <-chan *models.ExchangeState
+	var state *ExchangeState
+	var states <-chan *ExchangeState
 	for {
 		select {
 		case <-ctx.Done():
@@ -109,6 +110,11 @@ func (e *Exchange) Start() {
 	}
 }
 
+func (e *Exchange) SetOffset(offset int64) {
+	log.Debug().Int64("offset", offset).Msg("set offset")
+	atomic.StoreInt64(&e.offset, offset)
+}
+
 func (e *Exchange) Close() error {
 	e.shutdown()
 	close(e.lock)
@@ -117,14 +123,23 @@ func (e *Exchange) Close() error {
 	return nil
 }
 
-func (e *Exchange) Offset(data []byte) error {
-	o := &models.OffsetReq{}
+var (
+	exchangeInfo     map[string]interface{}
+	exchangeInfoErr  error
+	exchangeInfoOnce sync.Once
+)
 
-	if err := json.Unmarshal(data, o); err != nil {
-		return err
-	}
-	log.Debug().Int64("offset", o.Offset).Msg("Offset set")
-	atomic.StoreInt64(&e.offset, o.Offset)
+func LoadExchangeInfo(filename string) (map[string]interface{}, error) {
+	exchangeInfoOnce.Do(func() {
+		f, err := os.Open(filename)
+		if err != nil {
+			exchangeInfoErr = err
 
-	return nil
+			return
+		}
+		defer f.Close()
+		exchangeInfoErr = json.NewDecoder(f).Decode(exchangeInfo)
+	})
+
+	return exchangeInfo, exchangeInfoErr
 }

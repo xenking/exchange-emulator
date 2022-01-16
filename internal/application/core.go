@@ -2,23 +2,29 @@ package application
 
 import (
 	"context"
-	"io"
 	"sync/atomic"
 
 	"github.com/cornelk/hashmap"
+	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
-	"github.com/pkg/errors"
-	"github.com/segmentio/encoding/json"
 	"github.com/xenking/decimal"
 
-	"github.com/xenking/exchange-emulator/models"
+	"github.com/xenking/exchange-emulator/gen/proto/api"
+)
+
+var (
+	ErrEmptySymbol     = errors.New("empty symbol")
+	ErrNoData          = errors.New("no data")
+	ErrUnknownUser     = errors.New("unknown user")
+	ErrEmptyBalance    = errors.New("empty balance")
+	ErrNegativeBalance = errors.New("negative balance")
 )
 
 type Core struct {
-	UserBalances *hashmap.HashMap // map[userID][]*Balance
-	Exchanges    *hashmap.HashMap // map[userID]*Exchange
-	Orders       *hashmap.HashMap // map[OrderIDReq]*Order
-	callback     func(order *models.Order)
+	balances  *hashmap.HashMap // map[userID][]*Balance
+	Exchanges *hashmap.HashMap // map[userID]*Exchange
+	orders    *hashmap.HashMap // map[OrderIDReq]*Order
+	callback  func(order *api.Order)
 
 	commission    decimal.Decimal
 	exchangeFile  string
@@ -27,16 +33,16 @@ type Core struct {
 
 func NewCore(exchangeFile string, commission decimal.Decimal) *Core {
 	return &Core{
-		UserBalances: &hashmap.HashMap{},
-		Orders:       &hashmap.HashMap{},
-		Exchanges:    &hashmap.HashMap{},
+		balances:  &hashmap.HashMap{},
+		orders:    &hashmap.HashMap{},
+		Exchanges: &hashmap.HashMap{},
 
 		exchangeFile: exchangeFile,
 		commission:   commission,
 	}
 }
 
-func (c *Core) SetCallback(cb func(order *models.Order)) {
+func (c *Core) OnOrderUpdate(cb func(order *api.Order)) {
 	c.callback = cb
 }
 
@@ -50,7 +56,25 @@ func (c *Core) AddExchange(ctx context.Context, user uint64, file string) error 
 	return nil
 }
 
-func (c *Core) CurrState(user uint64) *models.ExchangeState {
+func (c *Core) ExchangeInfo() (map[string]interface{}, error) {
+	buf, err := LoadExchangeInfo(c.exchangeFile)
+
+	return buf, err
+}
+
+func (c *Core) GetPrice(user, symbol string) (decimal.Decimal, error) {
+	state := c.CurrState(user)
+	if state == nil {
+		return decimal.Decimal{}, ErrNoData
+	}
+
+	log.Debug().Str("user", user).Str("symbol", symbol).
+		Float64("price", state.Close.InexactFloat64()).Msg("Get price")
+
+	return state.Close, nil
+}
+
+func (c *Core) CurrState(user string) *ExchangeState {
 	ex, ok := c.Exchanges.Get(user)
 	if !ok {
 		return nil
@@ -60,9 +84,9 @@ func (c *Core) CurrState(user uint64) *models.ExchangeState {
 		return nil
 	}
 
-	var state *models.ExchangeState
+	var state *ExchangeState
 	wait := make(chan struct{})
-	exchange.transactions <- func(s *models.ExchangeState) bool {
+	exchange.transactions <- func(s *ExchangeState) bool {
 		state = s
 		close(wait)
 
@@ -73,186 +97,150 @@ func (c *Core) CurrState(user uint64) *models.ExchangeState {
 	return state
 }
 
-func (c *Core) ExchangeInfo(w io.Writer) error {
-	buf, err := LoadExchangeInfo(c.exchangeFile)
+func (c *Core) GetBalance(user string) (*api.Balances, error) {
+	bb, ok := c.balances.Get(user)
+	if !ok {
+		return nil, ErrUnknownUser
+	}
+	balances, ok := bb.(*api.Balances)
+	if !ok {
+		return nil, ErrUnknownUser
+	}
+
+	return balances, nil
+}
+
+func (c *Core) SetBalance(user string, balances *api.Balances) {
+	c.balances.Set(user, balances)
+	log.Debug().Str("user", user).Msg("Balance set")
+}
+
+func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
+	order.OrderId = atomic.AddUint64(&c.orderSequence, 1)
+	order.Status = api.OrderStatus_NEW
+	order.UserId = user
+
+	price, err := decimal.NewFromString(order.GetPrice())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, _ = w.Write(buf)
-
-	return nil
-}
-
-var (
-	ErrEmptySymbol     = errors.New("empty symbol")
-	ErrNoData          = errors.New("no data")
-	ErrUnknownUser     = errors.New("unknown user")
-	ErrEmptyBalance    = errors.New("empty balance")
-	ErrNegativeBalance = errors.New("negative balance")
-)
-
-func (c *Core) GetPrice(w io.Writer, user uint64, data []byte) error {
-	req := &models.PriceReq{}
-	if err := json.Unmarshal(data, req); err != nil {
-		return err
+	qty, err := decimal.NewFromString(order.GetQuantity())
+	if err != nil {
+		return nil, err
 	}
-	if req.Symbol == "" {
-		return ErrEmptySymbol
-	}
-	state := c.CurrState(user)
-	if state == nil {
-		return ErrNoData
-	}
-	req.Price = state.Close
-	req.Op = 0
-	log.Debug().Uint64("user", user).Str("symbol", req.Symbol).Float64("price", req.Price.InexactFloat64()).Msg("")
-	err := json.NewEncoder(w).Encode(req)
-
-	return err
-}
-
-func (c *Core) SetBalance(w io.Writer, user uint64, data []byte) error {
-	req := &models.BalancesReq{}
-	if err := json.Unmarshal(data, req); err != nil {
-		return err
-	}
-	c.UserBalances.Set(user, req.Balances)
-	req.Op = 0
-	log.Debug().Uint64("user", user).RawJSON("data", data).Msg("Balance set")
-	err := json.NewEncoder(w).Encode(req)
-
-	return err
-}
-
-func (c *Core) GetBalance(w io.Writer, user uint64) error {
-	b, ok := c.UserBalances.Get(user)
-	if !ok {
-		return ErrUnknownUser
-	}
-	err := json.NewEncoder(w).Encode(b)
-
-	return err
-}
-
-func (c *Core) CreateOrder(w io.Writer, user uint64, data []byte) error {
-	order := &models.Order{}
-	if err := json.Unmarshal(data, order); err != nil {
-		return err
-	}
-	order.UserID = user
-	order.OrderID = atomic.AddUint64(&c.orderSequence, 1)
-	order.Status = models.OrderStatusNew
-	if order.Side == models.OrderSideBuy {
-		order.Total = order.Price.Mul(order.Quantity)
+	var total decimal.Decimal
+	if order.Side == api.OrderSide_BUY {
+		total = price.Mul(qty)
 	} else {
-		order.Total = order.Quantity.Div(order.Price)
+		total = qty.Div(price)
 	}
-	order.Operation.Op = 0
+	order.Total = total.String()
 
-	if err := c.updateBalance(order); err != nil {
-		return err
+	err = c.updateBalance(order)
+	if err != nil {
+		return nil, err
 	}
-	c.Orders.Set(order.ID, order)
-	log.Debug().Str("order", order.ID).Uint64("user", order.UserID).Str("symbol", order.Symbol).
-		Str("side", order.Side).Msg("Order created")
-	err := json.NewEncoder(w).Encode(order)
+	c.orders.Set(order.GetId(), order)
+	log.Debug().Str("order", order.GetId()).Str("symbol", order.Symbol).
+		Str("side", order.Side.String()).Msg("Order created")
 
-	return err
+	return order, nil
 }
 
-func (c *Core) GetOrder(w io.Writer, data []byte) error {
-	o := &models.OrderIDReq{}
-	if err := json.Unmarshal(data, o); err != nil {
-		return err
-	}
-	v, ok := c.Orders.Get(o.ID)
+func (c *Core) GetOrder(id string) (*api.Order, error) {
+	o, ok := c.orders.Get(id)
 	if !ok {
-		return ErrNoData
+		return nil, ErrNoData
 	}
-	err := json.NewEncoder(w).Encode(v)
+	order, ok := o.(*api.Order)
+	if !ok {
+		return nil, ErrNoData
+	}
 
-	return err
+	return order, nil
 }
 
-func (c *Core) CancelOrder(w io.Writer, data []byte) error {
-	req := &models.OrderIDReq{}
-	if err := json.Unmarshal(data, req); err != nil {
-		return err
-	}
-	o, ok := c.Orders.Get(req.ID)
+func (c *Core) CancelOrder(id string) (*api.Order, error) {
+	o, ok := c.orders.Get(id)
 	if !ok {
-		return ErrNoData
+		return nil, ErrNoData
 	}
-	order, ok2 := o.(*models.Order)
+	order, ok2 := o.(*api.Order)
 	if !ok2 {
-		return ErrNoData
+		return nil, ErrNoData
 	}
-	c.Orders.Del(order.Price)
-	order.Status = models.OrderStatusCanceled
+	c.orders.Del(id)
+	order.Status = api.OrderStatus_CANCELED
 
 	if err := c.updateBalance(order); err != nil {
-		return err
+		return nil, err
 	}
-	log.Debug().Str("order", order.ID).Uint64("user", order.UserID).Str("symbol", order.Symbol).
-		Str("side", order.Side).Msg("Order canceled")
-	err := json.NewEncoder(w).Encode(order)
+	log.Debug().Str("order", order.Id).Str("user", order.UserId).Str("symbol", order.Symbol).
+		Str("side", order.Side.String()).Msg("Order canceled")
 
-	return err
+	return order, nil
 }
 
-func (c *Core) updateState(state *models.ExchangeState) (updated bool) {
-	for kv := range c.Orders.Iter() {
-		order, ok := kv.Value.(*models.Order)
+func (c *Core) updateState(state *ExchangeState) (updated bool) {
+	for kv := range c.orders.Iter() {
+		order, ok := kv.Value.(*api.Order)
 		if !ok {
 			continue
 		}
-		if order.Price.LessThan(state.Low) || order.Price.GreaterThan(state.High) {
+		price, err := decimal.NewFromString(order.Price)
+		if err != nil {
+			log.Error().Err(err).Str("order", order.Id).Str("price", order.Price).Msg("can't parse")
+		}
+		if price.LessThan(state.Low) || price.GreaterThan(state.High) {
 			continue
 		}
-		if order.Side == models.OrderSideBuy && order.Total.GreaterThan(state.AssetVolume) ||
-			order.Side == models.OrderSideSell && order.Total.GreaterThan(state.BaseVolume) {
-			log.Panic().Str("side", order.Side).Str("total", order.Total.String()).
+		total, err := decimal.NewFromString(order.Total)
+		if err != nil {
+			log.Error().Err(err).Str("order", order.Id).Str("total", order.Total).Msg("can't parse")
+		}
+		if order.Side == api.OrderSide_BUY && total.GreaterThan(state.AssetVolume) ||
+			order.Side == api.OrderSide_SELL && total.GreaterThan(state.BaseVolume) {
+			log.Panic().Str("side", order.Side.String()).Str("total", order.Total).
 				Str("asset", state.AssetVolume.String()).Str("base", state.BaseVolume.String()).
 				Int64("ts", state.Unix).Msg("can't close order in one kline. Need to use PARTIAL_FILLED")
 		}
 
 		updated = true
-		order.Status = models.OrderStatusFilled
-		log.Debug().Str("order", order.ID).Uint64("user", order.UserID).Str("symbol", order.Symbol).
-			Str("side", order.Side).Msg("Order filled")
+		order.Status = api.OrderStatus_FILLED
+		log.Debug().Str("order", order.Id).Str("user", order.UserId).Str("symbol", order.Symbol).
+			Str("side", order.Side.String()).Msg("Order filled")
 		if err := c.updateBalance(order); err != nil {
-			log.Error().Err(err).Str("order", order.ID).Msg("can't update balance")
+			log.Panic().Err(err).Str("order", order.Id).Msg("can't update balance")
 
 			continue
 		}
 		if c.callback != nil {
 			c.callback(order)
 		}
-		c.Orders.Del(order.ID)
+		c.orders.Del(order.Id)
 	}
 
 	return updated
 }
 
-var zero = decimal.NewFromInt(0)
-
-func (c *Core) updateBalance(o *models.Order) error {
-	bb, ok := c.UserBalances.Get(o.UserID)
+func (c *Core) updateBalance(o *api.Order) error {
+	bb, ok := c.balances.Get(o.UserId)
 	if !ok {
 		return ErrEmptyBalance
 	}
-	balances, ok2 := bb.([]*models.Balance)
+
+	balances, ok2 := bb.(*api.Balances)
 	if !ok2 {
 		return ErrEmptyBalance
 	}
 	var base, quote string
-	if o.Side == models.OrderSideBuy {
+	if o.GetSide() == api.OrderSide_BUY {
 		base, quote = o.Symbol[3:], o.Symbol[:3]
 	} else {
 		base, quote = o.Symbol[:3], o.Symbol[3:]
 	}
-	var input, output *models.Balance
-	for _, b := range balances {
+	var input, output *api.Balance
+	for _, b := range balances.GetData() {
 		switch b.Asset {
 		case base:
 			input = b
@@ -261,50 +249,79 @@ func (c *Core) updateBalance(o *models.Order) error {
 		}
 	}
 	if input == nil {
-		input = &models.Balance{
-			Asset:  base,
-			Free:   zero,
-			Locked: zero,
+		input = &api.Balance{
+			Asset: base,
 		}
-		balances = append(balances, input)
-		c.UserBalances.Set(o.UserID, balances)
+		balances.Data = append(balances.Data, input)
+		c.balances.Set(o.UserId, balances)
 	}
 	if output == nil {
-		output = &models.Balance{
-			Asset:  quote,
-			Free:   zero,
-			Locked: zero,
+		output = &api.Balance{
+			Asset: quote,
 		}
-		balances = append(balances, output)
-		c.UserBalances.Set(o.UserID, balances)
+		balances.Data = append(balances.Data, output)
+		c.balances.Set(o.UserId, balances)
+	}
+	total, err := decimal.NewFromString(o.Total)
+	if err != nil {
+		return err
+	}
+	inputFree, err := decimal.NewFromString(input.GetFree())
+	if err != nil {
+		return err
+	}
+	inputLocked, err := decimal.NewFromString(input.GetLocked())
+	if err != nil {
+		return err
+	}
+	outputFree, err := decimal.NewFromString(output.Free)
+	if err != nil {
+		return err
 	}
 
-	switch o.Status {
-	case models.OrderStatusNew:
-		input.Free = input.Free.Sub(o.Total)
-		input.Locked = input.Locked.Add(o.Total)
-		if input.Free.IsNegative() {
+	//nolint:exhaustive
+	switch o.GetStatus() {
+	case api.OrderStatus_NEW:
+		inputFree = inputFree.Sub(total)
+		if inputFree.IsNegative() {
 			return ErrNegativeBalance
 		}
-	case models.OrderStatusCanceled:
-		input.Locked = input.Locked.Sub(o.Total)
-		input.Free = input.Free.Add(o.Total)
-	case models.OrderStatusFilled:
-		input.Locked = input.Locked.Sub(o.Total)
-		output.Free = output.Free.Add(o.Quantity.Sub(o.Quantity.Mul(c.commission)))
-		if input.Locked.IsNegative() {
+		input.Free = inputFree.String()
+		input.Locked = inputLocked.Add(total).String()
+
+	case api.OrderStatus_CANCELED:
+		input.Locked = inputLocked.Sub(total).String()
+		input.Free = inputFree.Add(total).String()
+
+	case api.OrderStatus_FILLED:
+		inputLocked = inputLocked.Sub(total)
+		if inputLocked.IsNegative() {
 			return ErrNegativeBalance
+		}
+		input.Locked = inputLocked.String()
+
+		if o.GetSide() == api.OrderSide_BUY {
+			qty, err := decimal.NewFromString(o.Quantity)
+			if err != nil {
+				return err
+			}
+			output.Free = outputFree.Add(qty.Sub(qty.Mul(c.commission))).String()
+		} else {
+			price, err := decimal.NewFromString(o.Price)
+			if err != nil {
+				return err
+			}
+			output.Free = outputFree.Add(price.Sub(price.Mul(c.commission))).String()
 		}
 	}
-	log.Info().Uint64("user", o.UserID).
-		Str("base_asset", input.Asset).Float64("base_free", input.Free.InexactFloat64()).Float64("base_locked", input.Locked.InexactFloat64()).
-		Str("quote_asset", output.Asset).Float64("quote_free", output.Free.InexactFloat64()).Float64("quote_locked", output.Locked.InexactFloat64()).
-		Msg("Balance updated")
+	log.Info().Str("user", o.UserId).
+		Str("base_asset", input.Asset).Float64("base_free", inputFree.InexactFloat64()).Float64("base_locked", inputLocked.InexactFloat64()).
+		Str("quote_asset", output.Asset).Float64("quote_free", outputFree.InexactFloat64()).Msg("Balance updated")
 
 	return nil
 }
 
-func (c *Core) UserExchange(user uint64) *Exchange {
+func (c *Core) UserExchange(user string) *Exchange {
 	ex, ok := c.Exchanges.Get(user)
 	if !ok {
 		return nil
@@ -317,8 +334,8 @@ func (c *Core) UserExchange(user uint64) *Exchange {
 	return exchange
 }
 
-func (c *Core) DeleteExchange(user uint64) {
-	c.UserBalances.Del(user)
+func (c *Core) DeleteExchange(user string) {
+	c.balances.Del(user)
 
 	ex, ok := c.Exchanges.Get(user)
 	if !ok {
@@ -329,5 +346,5 @@ func (c *Core) DeleteExchange(user uint64) {
 		return
 	}
 	exchange.Close()
-	log.Debug().Uint64("user", user).Msg("Exchange deleted")
+	log.Debug().Str("user", user).Msg("Exchange deleted")
 }
