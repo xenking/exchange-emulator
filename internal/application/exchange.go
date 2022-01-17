@@ -22,17 +22,14 @@ type Exchange struct {
 
 type transaction func(*ExchangeState) bool
 
-func NewExchange(ctx context.Context, file string, cb transaction) (*Exchange, error) {
-	e := &Exchange{
+func NewExchange() *Exchange {
+	return &Exchange{
 		transactions: make(chan transaction),
 		lock:         make(chan struct{}),
 	}
-	err := e.initData(ctx, file, cb)
-
-	return e, err
 }
 
-func (e *Exchange) initData(ctx context.Context, file string, cb transaction) error {
+func (e *Exchange) Init(ctx context.Context, file string, cb transaction) error {
 	ctx, e.shutdown = context.WithCancel(ctx)
 	rf, err := rfile.Open(file)
 	if err != nil {

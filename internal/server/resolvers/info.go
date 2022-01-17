@@ -34,12 +34,7 @@ func (i *InfoServer) GetExchangeInfo(ctx context.Context, _ *emptypb.Empty) (*st
 }
 
 func (i *InfoServer) GetPrice(ctx context.Context, req *api.GetPriceRequest) (*api.GetPriceResponse, error) {
-	user, err := getUserID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	price, err := i.Core.GetPrice(user, req.GetSymbol())
+	price, err := i.Core.GetPrice(req.GetSymbol())
 	if err != nil {
 		return nil, status.Convert(err).Err()
 	}

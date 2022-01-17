@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+const UserServerPrefix = "/server.api.User"
 
 type AuthInterceptor struct{}
 
@@ -17,16 +20,20 @@ func NewAuthenticator() *AuthInterceptor {
 
 // NewUnaryInterceptor authorization unary interceptor function to handle authorize per RPC call
 func (i *AuthInterceptor) NewUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if err := i.authorize(ctx); err != nil {
-		return nil, err
+	if strings.HasPrefix(info.FullMethod, UserServerPrefix) {
+		if err := i.authorize(ctx); err != nil {
+			return nil, err
+		}
 	}
 
 	return handler(ctx, req)
 }
 
 func (i *AuthInterceptor) NewStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-	if err := i.authorize(ss.Context()); err != nil {
-		return err
+	if strings.HasPrefix(info.FullMethod, UserServerPrefix) {
+		if err := i.authorize(ss.Context()); err != nil {
+			return err
+		}
 	}
 
 	return handler(srv, ss)

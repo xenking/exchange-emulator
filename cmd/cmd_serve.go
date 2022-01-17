@@ -27,8 +27,7 @@ func serveCmd(ctx context.Context, flags cmdFlags) error {
 	l := logger.New(&cfg.Log)
 	logger.SetGlobal(l)
 	log.DefaultLogger = *logger.NewModule("global")
-	glog := logger.NewModule("grpc")
-	grpclog.SetLoggerV2(glog.Grpc(glog.Context))
+	grpclog.SetLoggerV2(l.Grpc(log.NewContext(nil).Str("module", "grpc").Value()))
 
 	return serve(ctx, cfg)
 }
@@ -48,8 +47,16 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		upg.Stop()
 	}()
 
-	wss := ws.New(ctx)
 	core := application.NewCore(cfg.ExchangeInfoFile, decimal.NewFromFloat(cfg.Commission))
+	exchange := application.NewExchange()
+	err := core.SetExchange(ctx, exchange, cfg.ExchangeDataFile)
+	if err != nil {
+		log.Error().Err(err).Msg("can't init exchange")
+
+		return err
+	}
+
+	wss := ws.New(ctx)
 	core.OnOrderUpdate(wss.OnOrderUpdate)
 	srv := server.New(core, cfg.GRPC, cfg.ExchangeDataFile)
 

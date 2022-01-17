@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	ErrEmptySymbol     = errors.New("empty symbol")
 	ErrNoData          = errors.New("no data")
 	ErrUnknownUser     = errors.New("unknown user")
 	ErrEmptyBalance    = errors.New("empty balance")
@@ -21,10 +20,10 @@ var (
 )
 
 type Core struct {
-	balances  *hashmap.HashMap // map[userID][]*Balance
-	Exchanges *hashmap.HashMap // map[userID]*Exchange
-	orders    *hashmap.HashMap // map[OrderIDReq]*Order
-	callback  func(order *api.Order)
+	balances *hashmap.HashMap // map[userID][]*Balance
+	orders   *hashmap.HashMap // map[OrderIDReq]*Order
+	exchange *Exchange
+	callback func(order *api.Order)
 
 	commission    decimal.Decimal
 	exchangeFile  string
@@ -33,9 +32,8 @@ type Core struct {
 
 func NewCore(exchangeFile string, commission decimal.Decimal) *Core {
 	return &Core{
-		balances:  &hashmap.HashMap{},
-		orders:    &hashmap.HashMap{},
-		Exchanges: &hashmap.HashMap{},
+		balances: &hashmap.HashMap{},
+		orders:   &hashmap.HashMap{},
 
 		exchangeFile: exchangeFile,
 		commission:   commission,
@@ -46,47 +44,28 @@ func (c *Core) OnOrderUpdate(cb func(order *api.Order)) {
 	c.callback = cb
 }
 
-func (c *Core) AddExchange(ctx context.Context, user uint64, file string) error {
-	exchange, err := NewExchange(ctx, file, c.updateState)
-	if err != nil {
-		return err
-	}
-	c.Exchanges.Set(user, exchange)
-
-	return nil
-}
-
 func (c *Core) ExchangeInfo() (map[string]interface{}, error) {
 	buf, err := LoadExchangeInfo(c.exchangeFile)
 
 	return buf, err
 }
 
-func (c *Core) GetPrice(user, symbol string) (decimal.Decimal, error) {
-	state := c.CurrState(user)
+func (c *Core) GetPrice(symbol string) (decimal.Decimal, error) {
+	state := c.CurrState()
 	if state == nil {
 		return decimal.Decimal{}, ErrNoData
 	}
 
-	log.Debug().Str("user", user).Str("symbol", symbol).
-		Float64("price", state.Close.InexactFloat64()).Msg("Get price")
+	log.Debug().Str("symbol", symbol).Float64("price", state.Close.InexactFloat64()).
+		Msg("Get price")
 
 	return state.Close, nil
 }
 
-func (c *Core) CurrState(user string) *ExchangeState {
-	ex, ok := c.Exchanges.Get(user)
-	if !ok {
-		return nil
-	}
-	exchange, ok2 := ex.(*Exchange)
-	if !ok2 {
-		return nil
-	}
-
+func (c *Core) CurrState() *ExchangeState {
 	var state *ExchangeState
 	wait := make(chan struct{})
-	exchange.transactions <- func(s *ExchangeState) bool {
+	c.exchange.transactions <- func(s *ExchangeState) bool {
 		state = s
 		close(wait)
 
@@ -321,30 +300,20 @@ func (c *Core) updateBalance(o *api.Order) error {
 	return nil
 }
 
-func (c *Core) UserExchange(user string) *Exchange {
-	ex, ok := c.Exchanges.Get(user)
-	if !ok {
-		return nil
-	}
-	exchange, ok2 := ex.(*Exchange)
-	if !ok2 {
-		return nil
-	}
-
-	return exchange
+func (c *Core) Exchange() *Exchange {
+	return c.exchange
 }
 
-func (c *Core) DeleteExchange(user string) {
-	c.balances.Del(user)
+func (c *Core) Close() error {
+	return c.exchange.Close()
+}
 
-	ex, ok := c.Exchanges.Get(user)
-	if !ok {
-		return
+func (c *Core) SetExchange(ctx context.Context, exchange *Exchange, file string) error {
+	err := exchange.Init(ctx, file, c.updateState)
+	if err != nil {
+		return err
 	}
-	exchange, ok2 := ex.(*Exchange)
-	if !ok2 {
-		return
-	}
-	exchange.Close()
-	log.Debug().Str("user", user).Msg("Exchange deleted")
+	c.exchange = exchange
+
+	return nil
 }
