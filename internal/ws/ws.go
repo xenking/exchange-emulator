@@ -52,7 +52,7 @@ func (s *Server) OnOrderUpdate(order *api.Order) {
 }
 
 func (s *Server) OpenConn(conn *websocket.Conn) {
-	log.Info().Uint64("user", conn.ID()).Msg("Open conn")
+	log.Info().Uint64("id", conn.ID()).Msg("Open conn")
 	conn.SetUserValue("init", false)
 }
 
@@ -61,8 +61,11 @@ func (s *Server) CloseConn(conn *websocket.Conn, err error) {
 		_, _ = conn.Write(NewError(err).Bytes())
 	}
 	id := conn.UserValue("id")
+	if id == nil {
+		return
+	}
 	s.clients.Del(id)
-	log.Info().Str("user", id.(string)).Msg("Close conn")
+	log.Info().Uint64("id", conn.ID()).Str("user", id.(string)).Msg("Close conn")
 }
 
 type initConn struct {
@@ -77,7 +80,7 @@ var (
 
 func (s *Server) OnData(conn *websocket.Conn, _ bool, data []byte) {
 	isInit := conn.UserValue("init")
-	if init, ok := isInit.(bool); init && ok {
+	if init, ok := isInit.(bool); ok && init {
 		_, _ = conn.Write(NewError(ErrAlreadyInit).Bytes())
 
 		return
@@ -100,6 +103,7 @@ func (s *Server) OnData(conn *websocket.Conn, _ bool, data []byte) {
 	conn.SetUserValue("user", init.UserID)
 	s.clients.Set(init.UserID, conn)
 	init.Initialized = true
+	log.Info().Uint64("id", conn.ID()).Str("user", init.UserID).Msg("Init conn")
 
 	err = json.NewEncoder(conn).Encode(init)
 	if err != nil {

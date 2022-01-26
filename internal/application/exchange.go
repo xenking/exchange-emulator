@@ -135,7 +135,7 @@ func LoadExchangeInfo(filename string) (map[string]interface{}, error) {
 			return
 		}
 		defer f.Close()
-		exchangeInfoErr = json.NewDecoder(f).Decode(exchangeInfo)
+		exchangeInfoErr = json.NewDecoder(f).Decode(&exchangeInfo)
 	})
 
 	return exchangeInfo, exchangeInfoErr
