@@ -2,7 +2,6 @@ package resolvers
 
 import (
 	"context"
-
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -43,7 +42,7 @@ func (u *UserServer) SetBalance(ctx context.Context, balances *api.Balances) (*e
 	}
 	u.Core.SetBalance(user, balances)
 
-	return nil, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (u *UserServer) CreateOrder(ctx context.Context, order *api.Order) (*api.Order, error) {

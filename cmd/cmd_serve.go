@@ -47,9 +47,9 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		upg.Stop()
 	}()
 
-	core := application.NewCore(cfg.ExchangeInfoFile, decimal.NewFromFloat(cfg.Commission))
+	core := application.NewCore(cfg.Exchange.InfoFile, decimal.NewFromFloat(cfg.Commission))
 	exchange := application.NewExchange()
-	err := core.SetExchange(ctx, exchange, cfg.ExchangeDataFile)
+	err := core.SetExchange(ctx, exchange, cfg.Exchange.DataFile, cfg.Exchange.Delay)
 	if err != nil {
 		log.Error().Err(err).Msg("can't init exchange")
 
@@ -58,7 +58,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 
 	wss := ws.New(ctx)
 	core.OnOrderUpdate(wss.OnOrderUpdate)
-	srv := server.New(core, cfg.GRPC, cfg.ExchangeDataFile)
+	srv := server.New(core, cfg.GRPC, cfg.Exchange.DataFile)
 
 	// Serve must be called before Ready
 	wssListener, err := upg.Listen("tcp", cfg.WS.Addr)

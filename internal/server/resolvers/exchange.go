@@ -23,13 +23,13 @@ func NewExchangeServer(core *application.Core) api.ExchangeServer {
 func (e *ExchangeServer) StartExchange(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	e.Core.Exchange().Start()
 
-	return nil, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (e *ExchangeServer) StopExchange(ctx context.Context, _ *emptypb.Empty) (*emptypb.Empty, error) {
 	e.Core.Exchange().Stop()
 
-	return nil, nil
+	return &emptypb.Empty{}, nil
 }
 
 func (e *ExchangeServer) SetOffsetExchange(ctx context.Context, req *api.OffsetExchangeRequest) (*emptypb.Empty, error) {
@@ -38,5 +38,5 @@ func (e *ExchangeServer) SetOffsetExchange(ctx context.Context, req *api.OffsetE
 		exchange.SetOffset(offset)
 	}
 
-	return nil, nil
+	return &emptypb.Empty{}, nil
 }

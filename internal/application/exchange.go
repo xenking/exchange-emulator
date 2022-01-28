@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/phuslu/log"
 	"github.com/segmentio/encoding/json"
@@ -16,6 +17,7 @@ type Exchange struct {
 	shutdown     context.CancelFunc
 	transactions chan transaction
 	lock         chan struct{}
+	signal       chan struct{}
 	offset       int64
 	run          uint32
 }
@@ -26,18 +28,20 @@ func NewExchange() *Exchange {
 	return &Exchange{
 		transactions: make(chan transaction),
 		lock:         make(chan struct{}),
+		signal:       make(chan struct{}),
 	}
 }
 
-func (e *Exchange) Init(ctx context.Context, file string, cb transaction) error {
+func (e *Exchange) Init(ctx context.Context, file string, cb transaction, delay time.Duration) error {
 	ctx, e.shutdown = context.WithCancel(ctx)
 	rf, err := rfile.Open(file)
 	if err != nil {
 		return err
 	}
-	data, errch := ParseCSV(ctx, rf)
+	data, errch := ParseCSV(ctx, rf, delay)
 
 	go e.dataLoop(ctx, data, cb)
+	go e.signalLoop(ctx)
 	go e.errorLoop(ctx, errch)
 
 	return nil
@@ -65,16 +69,29 @@ func (e *Exchange) dataLoop(ctx context.Context, data <-chan *ExchangeState, cb 
 			t(state)
 		case state, opened = <-states:
 			if !opened {
-				e.Stop()
+				log.Warn().Msg("exchange closed")
 
 				return
 			}
 			if state.Unix < off {
 				continue
 			}
+			log.Trace().Int64("ts", state.Unix).Msg("state")
 			if updated := cb(state); updated {
+				log.Debug().Int64("ts", state.Unix).Msg("trigger")
 				e.Stop()
 			}
+		}
+	}
+}
+
+func (e *Exchange) signalLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-e.signal:
+			e.lock <- struct{}{}
 		}
 	}
 }
@@ -96,14 +113,14 @@ func (e *Exchange) errorLoop(ctx context.Context, errch chan error) {
 func (e *Exchange) Stop() {
 	if ok := atomic.CompareAndSwapUint32(&e.run, 1, 0); ok {
 		log.Debug().Msg("exchange stopped")
-		e.lock <- struct{}{}
+		e.signal <- struct{}{}
 	}
 }
 
 func (e *Exchange) Start() {
 	if ok := atomic.CompareAndSwapUint32(&e.run, 0, 1); ok {
 		log.Debug().Msg("exchange started")
-		e.lock <- struct{}{}
+		e.signal <- struct{}{}
 	}
 }
 
@@ -115,6 +132,7 @@ func (e *Exchange) SetOffset(offset int64) {
 func (e *Exchange) Close() error {
 	e.shutdown()
 	close(e.lock)
+	close(e.signal)
 	close(e.transactions)
 
 	return nil

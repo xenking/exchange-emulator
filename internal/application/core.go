@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
-	"github.com/cornelk/hashmap"
 	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
@@ -20,8 +22,9 @@ var (
 )
 
 type Core struct {
-	balances *hashmap.HashMap // map[userID][]*Balance
-	orders   *hashmap.HashMap // map[OrderIDReq]*Order
+	m        sync.Mutex
+	balances map[string]*api.Balances
+	orders   map[string]*api.Order
 	exchange *Exchange
 	callback func(order *api.Order)
 
@@ -32,8 +35,8 @@ type Core struct {
 
 func NewCore(exchangeFile string, commission decimal.Decimal) *Core {
 	return &Core{
-		balances: &hashmap.HashMap{},
-		orders:   &hashmap.HashMap{},
+		balances: make(map[string]*api.Balances),
+		orders:   make(map[string]*api.Order),
 
 		exchangeFile: exchangeFile,
 		commission:   commission,
@@ -77,25 +80,39 @@ func (c *Core) CurrState() *ExchangeState {
 }
 
 func (c *Core) GetBalance(user string) (*api.Balances, error) {
-	bb, ok := c.balances.Get(user)
+	c.m.Lock()
+	balances, ok := c.balances[user]
 	if !ok {
+		c.m.Unlock()
+
 		return nil, ErrUnknownUser
 	}
-	balances, ok := bb.(*api.Balances)
-	if !ok {
-		return nil, ErrUnknownUser
-	}
+	c.m.Unlock()
 
 	return balances, nil
 }
 
 func (c *Core) SetBalance(user string, balances *api.Balances) {
-	c.balances.Set(user, balances)
+	for _, b := range balances.Data {
+		b.Asset = strings.ToUpper(b.Asset)
+		if b.Free == "" {
+			b.Free = "0"
+		}
+		if b.Locked == "" {
+			b.Locked = "0"
+		}
+	}
+
+	c.m.Lock()
+	c.balances[user] = balances
+	c.m.Unlock()
+
 	log.Debug().Str("user", user).Msg("Balance set")
 }
 
 func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
 	order.OrderId = atomic.AddUint64(&c.orderSequence, 1)
+	order.Symbol = strings.ToUpper(order.Symbol)
 	order.Status = api.OrderStatus_NEW
 	order.UserId = user
 
@@ -119,7 +136,9 @@ func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.orders.Set(order.GetId(), order)
+	c.m.Lock()
+	c.orders[order.GetId()] = order
+	c.m.Unlock()
 	log.Debug().Str("order", order.GetId()).Str("symbol", order.Symbol).
 		Str("side", order.Side.String()).Msg("Order created")
 
@@ -127,28 +146,30 @@ func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
 }
 
 func (c *Core) GetOrder(id string) (*api.Order, error) {
-	o, ok := c.orders.Get(id)
+	c.m.Lock()
+	order, ok := c.orders[id]
 	if !ok {
+		c.m.Unlock()
+
 		return nil, ErrNoData
 	}
-	order, ok := o.(*api.Order)
-	if !ok {
-		return nil, ErrNoData
-	}
+	c.m.Unlock()
 
 	return order, nil
 }
 
 func (c *Core) CancelOrder(id string) (*api.Order, error) {
-	o, ok := c.orders.Get(id)
+	c.m.Lock()
+
+	order, ok := c.orders[id]
 	if !ok {
+		c.m.Unlock()
+
 		return nil, ErrNoData
 	}
-	order, ok2 := o.(*api.Order)
-	if !ok2 {
-		return nil, ErrNoData
-	}
-	c.orders.Del(id)
+	delete(c.orders, id)
+	c.m.Unlock()
+
 	order.Status = api.OrderStatus_CANCELED
 
 	if err := c.updateBalance(order); err != nil {
@@ -161,11 +182,10 @@ func (c *Core) CancelOrder(id string) (*api.Order, error) {
 }
 
 func (c *Core) updateState(state *ExchangeState) (updated bool) {
-	for kv := range c.orders.Iter() {
-		order, ok := kv.Value.(*api.Order)
-		if !ok {
-			continue
-		}
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	for _, order := range c.orders {
 		price, err := decimal.NewFromString(order.Price)
 		if err != nil {
 			log.Error().Err(err).Str("order", order.Id).Str("price", order.Price).Msg("can't parse")
@@ -188,30 +208,33 @@ func (c *Core) updateState(state *ExchangeState) (updated bool) {
 		order.Status = api.OrderStatus_FILLED
 		log.Debug().Str("order", order.Id).Str("user", order.UserId).Str("symbol", order.Symbol).
 			Str("side", order.Side.String()).Msg("Order filled")
+		c.m.Unlock()
 		if err := c.updateBalance(order); err != nil {
 			log.Panic().Err(err).Str("order", order.Id).Msg("can't update balance")
+			c.m.Lock()
 
 			continue
 		}
+		c.m.Lock()
+
 		if c.callback != nil {
 			c.callback(order)
 		}
-		c.orders.Del(order.Id)
+		delete(c.orders, order.Id)
 	}
 
 	return updated
 }
 
 func (c *Core) updateBalance(o *api.Order) error {
-	bb, ok := c.balances.Get(o.UserId)
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	balances, ok := c.balances[o.UserId]
 	if !ok {
 		return ErrEmptyBalance
 	}
 
-	balances, ok2 := bb.(*api.Balances)
-	if !ok2 {
-		return ErrEmptyBalance
-	}
 	var base, quote string
 	if o.GetSide() == api.OrderSide_BUY {
 		base, quote = o.Symbol[3:], o.Symbol[:3]
@@ -229,17 +252,19 @@ func (c *Core) updateBalance(o *api.Order) error {
 	}
 	if input == nil {
 		input = &api.Balance{
-			Asset: base,
+			Asset:  strings.ToUpper(base),
+			Free:   "0",
+			Locked: "0",
 		}
 		balances.Data = append(balances.Data, input)
-		c.balances.Set(o.UserId, balances)
 	}
 	if output == nil {
 		output = &api.Balance{
-			Asset: quote,
+			Asset:  strings.ToUpper(quote),
+			Free:   "0",
+			Locked: "0",
 		}
 		balances.Data = append(balances.Data, output)
-		c.balances.Set(o.UserId, balances)
 	}
 	total, err := decimal.NewFromString(o.Total)
 	if err != nil {
@@ -294,8 +319,8 @@ func (c *Core) updateBalance(o *api.Order) error {
 		}
 	}
 	log.Info().Str("user", o.UserId).
-		Str("base_asset", input.Asset).Float64("base_free", inputFree.InexactFloat64()).Float64("base_locked", inputLocked.InexactFloat64()).
-		Str("quote_asset", output.Asset).Float64("quote_free", outputFree.InexactFloat64()).Msg("Balance updated")
+		Strs("base", []string{input.Asset, input.Free, input.Locked}).
+		Strs("quote", []string{output.Asset, output.Free, output.Locked}).Msg("Balance updated")
 
 	return nil
 }
@@ -308,8 +333,8 @@ func (c *Core) Close() error {
 	return c.exchange.Close()
 }
 
-func (c *Core) SetExchange(ctx context.Context, exchange *Exchange, file string) error {
-	err := exchange.Init(ctx, file, c.updateState)
+func (c *Core) SetExchange(ctx context.Context, exchange *Exchange, file string, delay time.Duration) error {
+	err := exchange.Init(ctx, file, c.updateState, delay)
 	if err != nil {
 		return err
 	}

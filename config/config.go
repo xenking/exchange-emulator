@@ -14,19 +14,24 @@ var ApplicationVersion string
 type Config struct {
 	GracefulShutdownDelay time.Duration `default:"30s"`
 
-	ExchangeDataFile string
-	ExchangeInfoFile string  `default:"./data/exchange.json"`
-	Commission       float64 `default:"0.1"`
+	Commission float64 `default:"0.01"`
 
-	App  ApplicationConfig
-	Log  LoggerConfig
-	WS   WSConfig
-	GRPC GRPCConfig
+	App      ApplicationConfig
+	Exchange ExchangeConfig
+	Log      LoggerConfig
+	WS       WSConfig
+	GRPC     GRPCConfig
 }
 
 type ApplicationConfig struct {
 	Version string `default:"v0.0.1"`
 	Name    string `default:"exchange-emulator"`
+}
+
+type ExchangeConfig struct {
+	DataFile string
+	InfoFile string        `default:"./data/exchange.json"`
+	Delay    time.Duration `default:"1ms"`
 }
 
 type WSConfig struct {
