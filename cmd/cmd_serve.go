@@ -47,9 +47,9 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		upg.Stop()
 	}()
 
-	core := application.NewCore(cfg.Exchange.InfoFile, decimal.NewFromFloat(cfg.Commission))
+	core := application.NewCore(cfg.Exchange.InfoFile, decimal.NewFromFloat(cfg.Exchange.Commission))
 	exchange := application.NewExchange()
-	err := core.SetExchange(ctx, exchange, cfg.Exchange.DataFile, cfg.Exchange.Delay)
+	err := core.SetExchange(ctx, exchange, cfg.Exchange.DataFile, cfg.Exchange.Delay, cfg.Exchange.Offset)
 	if err != nil {
 		log.Error().Err(err).Msg("can't init exchange")
 

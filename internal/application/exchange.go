@@ -32,13 +32,13 @@ func NewExchange() *Exchange {
 	}
 }
 
-func (e *Exchange) Init(ctx context.Context, file string, cb transaction, delay time.Duration) error {
+func (e *Exchange) Init(ctx context.Context, file string, cb transaction, delay time.Duration, initOffset int64) error {
 	ctx, e.shutdown = context.WithCancel(ctx)
 	rf, err := rfile.Open(file)
 	if err != nil {
 		return err
 	}
-	data, errch := ParseCSV(ctx, rf, delay)
+	data, errch := ParseCSV(ctx, rf, delay, initOffset)
 
 	go e.dataLoop(ctx, data, cb)
 	go e.signalLoop(ctx)
@@ -52,6 +52,18 @@ func (e *Exchange) dataLoop(ctx context.Context, data <-chan *ExchangeState, cb 
 	var opened bool
 	var state *ExchangeState
 	var states <-chan *ExchangeState
+
+	select {
+	case <-ctx.Done():
+		return
+	case state, opened = <-data:
+		if !opened {
+			log.Warn().Msg("exchange closed")
+
+			return
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -78,7 +90,7 @@ func (e *Exchange) dataLoop(ctx context.Context, data <-chan *ExchangeState, cb 
 			}
 			log.Trace().Int64("ts", state.Unix).Msg("state")
 			if updated := cb(state); updated {
-				log.Debug().Int64("ts", state.Unix).Msg("trigger")
+				log.Debug().Int64("ts", state.Unix).Str("price", state.Close.String()).Msg("updated")
 				e.Stop()
 			}
 		}

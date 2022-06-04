@@ -2,7 +2,7 @@ app:
   version: 0.1.0
 
 log:
-  level: trace
+  level: debug
 
 ws:
   addr: ":8082"
@@ -12,8 +12,8 @@ grpc:
   disable_auth: false
 
 exchange:
-  data_file: "./data/Binance_ETHUSDT_1h.csv"
+  data_file: "./data/Binance_ETHUSDT_minute.csv"
   info_file: "./data/exchange.json"
-  delay: 10ms
-
-commission: 0.01
+  delay: 1ms
+  offset: 1597351740000
+  commission: 0.1

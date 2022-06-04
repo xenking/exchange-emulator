@@ -14,8 +14,6 @@ var ApplicationVersion string
 type Config struct {
 	GracefulShutdownDelay time.Duration `default:"30s"`
 
-	Commission float64 `default:"0.01"`
-
 	App      ApplicationConfig
 	Exchange ExchangeConfig
 	Log      LoggerConfig
@@ -29,9 +27,11 @@ type ApplicationConfig struct {
 }
 
 type ExchangeConfig struct {
-	DataFile string
-	InfoFile string        `default:"./data/exchange.json"`
-	Delay    time.Duration `default:"1ms"`
+	DataFile   string
+	InfoFile   string        `default:"./data/exchange.json"`
+	Delay      time.Duration `default:"1ms"`
+	Offset     int64         `default:"0"`
+	Commission float64       `default:"0.1"`
 }
 
 type WSConfig struct {

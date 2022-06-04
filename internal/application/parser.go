@@ -66,8 +66,7 @@ func (s *ExchangeState) UnmarshalCSV(_, v []string) error {
 	return err
 }
 
-//nolint:gocritic
-func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration) (<-chan *ExchangeState, chan error) {
+func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset int64) (<-chan *ExchangeState, chan error) {
 	states := make(chan *ExchangeState)
 	errc := make(chan error)
 
@@ -76,12 +75,41 @@ func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration) (<-chan
 		defer close(errc)
 		defer r.Close()
 
-		ticker := time.NewTicker(delay)
-		defer ticker.Stop()
-
 		d := csv.NewDecoder(r).Header(false)
 		var row string
 		var err error
+		first := &ExchangeState{}
+		for {
+			row, err = d.ReadLine()
+			if err != nil {
+				errc <- err
+
+				return
+			}
+
+			// check for EOF condition
+			if row == "" {
+				return
+			}
+
+			err = d.DecodeRecord(first, row)
+			if err != nil {
+				errc <- err
+
+				return
+			}
+			if first.Unix >= offset {
+				break
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case states <- first:
+		}
+
+		ticker := time.NewTicker(delay)
+		defer ticker.Stop()
 		for range ticker.C {
 			row, err = d.ReadLine()
 			if err != nil {

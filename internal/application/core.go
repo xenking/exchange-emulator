@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	ErrNoData          = errors.New("no data")
-	ErrUnknownUser     = errors.New("unknown user")
-	ErrEmptyBalance    = errors.New("empty balance")
-	ErrNegativeBalance = errors.New("negative balance")
+	ErrNoData             = errors.New("no data")
+	ErrUnknownUser        = errors.New("unknown user")
+	ErrEmptyBalance       = errors.New("empty balance")
+	ErrNegativeBalance    = errors.New("negative balance")
+	ErrNegativeSubBalance = errors.New("negative sub balance")
 )
 
 type Core struct {
@@ -39,7 +40,7 @@ func NewCore(exchangeFile string, commission decimal.Decimal) *Core {
 		orders:   make(map[string]*api.Order),
 
 		exchangeFile: exchangeFile,
-		commission:   commission,
+		commission:   commission.Div(decimal.NewFromInt(100)),
 	}
 }
 
@@ -124,13 +125,8 @@ func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
 	if err != nil {
 		return nil, err
 	}
-	var total decimal.Decimal
-	if order.Side == api.OrderSide_BUY {
-		total = price.Mul(qty)
-	} else {
-		total = qty.Div(price)
-	}
-	order.Total = total.String()
+
+	order.Total = price.Mul(qty).String()
 
 	err = c.updateBalance(order)
 	if err != nil {
@@ -266,6 +262,10 @@ func (c *Core) updateBalance(o *api.Order) error {
 		}
 		balances.Data = append(balances.Data, output)
 	}
+	qty, err := decimal.NewFromString(o.Quantity)
+	if err != nil {
+		return err
+	}
 	total, err := decimal.NewFromString(o.Total)
 	if err != nil {
 		return err
@@ -278,7 +278,7 @@ func (c *Core) updateBalance(o *api.Order) error {
 	if err != nil {
 		return err
 	}
-	outputFree, err := decimal.NewFromString(output.Free)
+	outputFree, err := decimal.NewFromString(output.GetFree())
 	if err != nil {
 		return err
 	}
@@ -286,37 +286,50 @@ func (c *Core) updateBalance(o *api.Order) error {
 	//nolint:exhaustive
 	switch o.GetStatus() {
 	case api.OrderStatus_NEW:
-		inputFree = inputFree.Sub(total)
-		if inputFree.IsNegative() {
-			return ErrNegativeBalance
+		if o.GetSide() == api.OrderSide_BUY {
+			inputFree = inputFree.Sub(total)
+			if inputFree.IsNegative() {
+				log.Error().Str("input.free", input.Free).Str("total", total.String()).Msg("new order")
+
+				return ErrNegativeBalance
+			}
+			inputLocked = inputLocked.Add(total)
+		} else {
+			inputFree = inputFree.Sub(qty)
+			if inputFree.IsNegative() {
+				log.Error().Str("input.free", input.Free).Str("qty", qty.String()).Msg("new order")
+
+				return ErrNegativeBalance
+			}
+			inputLocked = inputLocked.Add(qty)
 		}
 		input.Free = inputFree.String()
-		input.Locked = inputLocked.Add(total).String()
-
-	case api.OrderStatus_CANCELED:
-		input.Locked = inputLocked.Sub(total).String()
-		input.Free = inputFree.Add(total).String()
-
-	case api.OrderStatus_FILLED:
-		inputLocked = inputLocked.Sub(total)
-		if inputLocked.IsNegative() {
-			return ErrNegativeBalance
-		}
 		input.Locked = inputLocked.String()
 
+	case api.OrderStatus_CANCELED:
 		if o.GetSide() == api.OrderSide_BUY {
-			qty, err := decimal.NewFromString(o.Quantity)
-			if err != nil {
-				return err
-			}
-			output.Free = outputFree.Add(qty.Sub(qty.Mul(c.commission))).String()
+			input.Locked = inputLocked.Sub(total).String()
+			input.Free = inputFree.Add(total).String()
 		} else {
-			price, err := decimal.NewFromString(o.Price)
-			if err != nil {
-				return err
-			}
-			output.Free = outputFree.Add(price.Sub(price.Mul(c.commission))).String()
+			input.Locked = inputLocked.Sub(qty).String()
+			input.Free = inputFree.Add(qty).String()
 		}
+
+	case api.OrderStatus_FILLED:
+		if o.GetSide() == api.OrderSide_BUY {
+			inputLocked = inputLocked.Sub(total)
+			outputFree = outputFree.Add(qty.Sub(qty.Mul(c.commission)))
+		} else {
+			inputLocked = inputLocked.Sub(qty)
+			outputFree = outputFree.Add(total.Sub(total.Mul(c.commission)))
+		}
+		if inputLocked.IsNegative() {
+			log.Error().Str("input.locked", input.Locked).Str("total", total.String()).Msg("order filled")
+
+			return ErrNegativeSubBalance
+		}
+		input.Locked = inputLocked.String()
+		output.Free = outputFree.String()
 	}
 	log.Info().Str("user", o.UserId).
 		Strs("base", []string{input.Asset, input.Free, input.Locked}).
@@ -333,8 +346,8 @@ func (c *Core) Close() error {
 	return c.exchange.Close()
 }
 
-func (c *Core) SetExchange(ctx context.Context, exchange *Exchange, file string, delay time.Duration) error {
-	err := exchange.Init(ctx, file, c.updateState, delay)
+func (c *Core) SetExchange(ctx context.Context, exchange *Exchange, file string, delay time.Duration, offset int64) error {
+	err := exchange.Init(ctx, file, c.updateState, delay, offset)
 	if err != nil {
 		return err
 	}
