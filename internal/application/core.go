@@ -82,13 +82,12 @@ func (c *Core) CurrState() *ExchangeState {
 
 func (c *Core) GetBalance(user string) (*api.Balances, error) {
 	c.m.Lock()
+	defer c.m.Unlock()
+
 	balances, ok := c.balances[user]
 	if !ok {
-		c.m.Unlock()
-
 		return nil, ErrUnknownUser
 	}
-	c.m.Unlock()
 
 	return balances, nil
 }
@@ -105,8 +104,9 @@ func (c *Core) SetBalance(user string, balances *api.Balances) {
 	}
 
 	c.m.Lock()
+	defer c.m.Unlock()
+
 	c.balances[user] = balances
-	c.m.Unlock()
 
 	log.Debug().Str("user", user).Msg("Balance set")
 }
@@ -128,13 +128,16 @@ func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
 
 	order.Total = price.Mul(qty).String()
 
+	c.m.Lock()
+	defer c.m.Unlock()
+
 	err = c.updateBalance(order)
 	if err != nil {
 		return nil, err
 	}
-	c.m.Lock()
+
 	c.orders[order.GetId()] = order
-	c.m.Unlock()
+
 	log.Debug().Str("order", order.GetId()).Str("symbol", order.Symbol).
 		Str("side", order.Side.String()).Msg("Order created")
 
@@ -143,28 +146,25 @@ func (c *Core) CreateOrder(user string, order *api.Order) (*api.Order, error) {
 
 func (c *Core) GetOrder(id string) (*api.Order, error) {
 	c.m.Lock()
+	defer c.m.Unlock()
+
 	order, ok := c.orders[id]
 	if !ok {
-		c.m.Unlock()
-
 		return nil, ErrNoData
 	}
-	c.m.Unlock()
 
 	return order, nil
 }
 
 func (c *Core) CancelOrder(id string) (*api.Order, error) {
 	c.m.Lock()
+	defer c.m.Unlock()
 
 	order, ok := c.orders[id]
 	if !ok {
-		c.m.Unlock()
-
 		return nil, ErrNoData
 	}
 	delete(c.orders, id)
-	c.m.Unlock()
 
 	order.Status = api.OrderStatus_CANCELED
 
@@ -204,14 +204,11 @@ func (c *Core) updateState(state *ExchangeState) (updated bool) {
 		order.Status = api.OrderStatus_FILLED
 		log.Debug().Str("order", order.Id).Str("user", order.UserId).Str("symbol", order.Symbol).
 			Str("side", order.Side.String()).Msg("Order filled")
-		c.m.Unlock()
 		if err := c.updateBalance(order); err != nil {
 			log.Panic().Err(err).Str("order", order.Id).Msg("can't update balance")
-			c.m.Lock()
 
 			continue
 		}
-		c.m.Lock()
 
 		if c.callback != nil {
 			c.callback(order)
@@ -223,9 +220,6 @@ func (c *Core) updateState(state *ExchangeState) (updated bool) {
 }
 
 func (c *Core) updateBalance(o *api.Order) error {
-	c.m.Lock()
-	defer c.m.Unlock()
-
 	balances, ok := c.balances[o.UserId]
 	if !ok {
 		return ErrEmptyBalance
