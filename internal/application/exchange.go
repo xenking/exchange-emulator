@@ -9,8 +9,6 @@ import (
 
 	"github.com/phuslu/log"
 	"github.com/segmentio/encoding/json"
-
-	"github.com/xenking/exchange-emulator/pkg/rfile"
 )
 
 type Exchange struct {
@@ -19,10 +17,11 @@ type Exchange struct {
 	lock         chan struct{}
 	signal       chan struct{}
 	offset       int64
+	timestamp    int64
 	run          uint32
 }
 
-type transaction func(*ExchangeState) bool
+type transaction func(ExchangeState) bool
 
 func NewExchange() *Exchange {
 	return &Exchange{
@@ -34,11 +33,12 @@ func NewExchange() *Exchange {
 
 func (e *Exchange) Init(ctx context.Context, file string, cb transaction, delay time.Duration, initOffset int64) error {
 	ctx, e.shutdown = context.WithCancel(ctx)
-	rf, err := rfile.Open(file)
+	f, err := os.Open(file)
+	//rf, err := rfile.Open(file)
 	if err != nil {
 		return err
 	}
-	data, errch := ParseCSV(ctx, rf, delay, initOffset)
+	data, errch := ParseCSV(ctx, f, delay, initOffset)
 
 	go e.dataLoop(ctx, data, cb)
 	go e.signalLoop(ctx)
@@ -47,22 +47,22 @@ func (e *Exchange) Init(ctx context.Context, file string, cb transaction, delay 
 	return nil
 }
 
-func (e *Exchange) dataLoop(ctx context.Context, data <-chan *ExchangeState, cb transaction) {
+func (e *Exchange) dataLoop(ctx context.Context, data <-chan ExchangeState, cb transaction) {
 	var off int64
 	var opened bool
-	var state *ExchangeState
-	var states <-chan *ExchangeState
+	var state ExchangeState
+	var states <-chan ExchangeState
 
-	select {
-	case <-ctx.Done():
-		return
-	case state, opened = <-data:
-		if !opened {
-			log.Warn().Msg("exchange closed")
-
-			return
-		}
-	}
+	//select {
+	//case <-ctx.Done():
+	//	return
+	//case state, opened = <-data:
+	//	if !opened {
+	//		log.Warn().Msg("exchange closed")
+	//
+	//		return
+	//	}
+	//}
 
 	for {
 		select {
@@ -85,9 +85,13 @@ func (e *Exchange) dataLoop(ctx context.Context, data <-chan *ExchangeState, cb 
 
 				return
 			}
+
 			if state.Unix < off {
 				continue
 			}
+
+			atomic.StoreInt64(&e.timestamp, state.Unix)
+
 			log.Trace().Int64("ts", state.Unix).Msg("state")
 			if updated := cb(state); updated {
 				log.Debug().Int64("ts", state.Unix).Str("price", state.Close.String()).Msg("updated")
@@ -139,6 +143,10 @@ func (e *Exchange) Start() {
 func (e *Exchange) SetOffset(offset int64) {
 	log.Debug().Int64("offset", offset).Msg("set offset")
 	atomic.StoreInt64(&e.offset, offset)
+}
+
+func (e *Exchange) ShiftTime() int64 {
+	return atomic.AddInt64(&e.timestamp, 1)
 }
 
 func (e *Exchange) Close() error {

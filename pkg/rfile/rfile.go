@@ -9,11 +9,12 @@ import (
 // Rfile manages a file opened for reading line-by-line in reverse.
 type Rfile struct {
 	fh       *os.File
+	lines    [][]byte
+	lastLine []byte
+	line     []byte
 	offset   int64
 	bufsize  int
-	lines    [][]byte
 	i        int
-	lastLine []byte
 }
 
 // Open returns Rfile handle to be read in reverse line-by-line.
@@ -102,22 +103,23 @@ func (rf *Rfile) Read(buf []byte) (n int, err error) {
 		return n, nil
 	}
 
-	var line []byte
+	rf.line = rf.line[:]
+
 	var nn int
 	for remain > 0 {
-		line, err = rf.ReadLine()
+		rf.line, err = rf.ReadLine()
 		if err != nil {
 			return
 		}
-		if len(line) == 0 {
+		if len(rf.line) == 0 {
 			return n, nil
 		}
-		nn = copy(buf[n:], line)
+		nn = copy(buf[n:], rf.line)
 		remain -= nn
 		n += nn
 	}
-	if nn < len(line) {
-		rf.lastLine = line[nn:]
+	if nn < len(rf.line) {
+		rf.lastLine = rf.line[nn:]
 	}
 
 	return n, err

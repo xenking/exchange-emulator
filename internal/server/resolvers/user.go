@@ -50,12 +50,13 @@ func (u *UserServer) CreateOrder(ctx context.Context, order *api.Order) (*api.Or
 	if err != nil {
 		return nil, err
 	}
-	order, err = u.Core.CreateOrder(user, order)
+
+	o, err := u.Core.CreateOrder(user, order)
 	if err != nil {
 		return nil, status.Convert(err).Err()
 	}
 
-	return order, nil
+	return o.Order, nil
 }
 
 func (u *UserServer) GetOrder(ctx context.Context, req *api.OrderRequest) (*api.Order, error) {
@@ -64,7 +65,7 @@ func (u *UserServer) GetOrder(ctx context.Context, req *api.OrderRequest) (*api.
 		return nil, status.Convert(err).Err()
 	}
 
-	return order, nil
+	return order.Order, nil
 }
 
 func (u *UserServer) DeleteOrder(ctx context.Context, req *api.OrderRequest) (*api.Order, error) {
@@ -73,7 +74,7 @@ func (u *UserServer) DeleteOrder(ctx context.Context, req *api.OrderRequest) (*a
 		return nil, status.Convert(err).Err()
 	}
 
-	return order, nil
+	return order.Order, nil
 }
 
 func getUserID(ctx context.Context) (string, error) {

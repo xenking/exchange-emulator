@@ -66,8 +66,8 @@ func (s *ExchangeState) UnmarshalCSV(_, v []string) error {
 	return err
 }
 
-func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset int64) (<-chan *ExchangeState, chan error) {
-	states := make(chan *ExchangeState)
+func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset int64) (<-chan ExchangeState, chan error) {
+	states := make(chan ExchangeState)
 	errc := make(chan error)
 
 	go func(ctx context.Context) {
@@ -78,7 +78,7 @@ func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset 
 		d := csv.NewDecoder(r).Header(false)
 		var row string
 		var err error
-		first := &ExchangeState{}
+		first := ExchangeState{}
 		for {
 			row, err = d.ReadLine()
 			if err != nil {
@@ -92,7 +92,7 @@ func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset 
 				return
 			}
 
-			err = d.DecodeRecord(first, row)
+			err = d.DecodeRecord(&first, row)
 			if err != nil {
 				errc <- err
 
@@ -123,8 +123,8 @@ func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset 
 				return
 			}
 
-			f := &ExchangeState{}
-			err = d.DecodeRecord(f, row)
+			f := ExchangeState{}
+			err = d.DecodeRecord(&f, row)
 			if err != nil {
 				errc <- err
 

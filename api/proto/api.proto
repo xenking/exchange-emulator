@@ -92,6 +92,8 @@ message Order {
   [(google.api.field_behavior) = OUTPUT_ONLY];
   string user_id = 10
   [(google.api.field_behavior) = OUTPUT_ONLY];
+  int64 transact_time = 11
+  [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 message OrderRequest {

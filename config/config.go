@@ -22,8 +22,10 @@ type Config struct {
 }
 
 type ApplicationConfig struct {
-	Version string `default:"v0.0.1"`
-	Name    string `default:"exchange-emulator"`
+	Version                 string        `default:"v0.0.1"`
+	Name                    string        `default:"exchange-emulator"`
+	OrderExpiration         time.Duration `default:"24h"`
+	OrderExpirePricePercent int64         `default:"5"`
 }
 
 type ExchangeConfig struct {
@@ -45,7 +47,7 @@ type GRPCConfig struct {
 
 type LoggerConfig struct {
 	Level      string `default:"debug"`
-	WithCaller int    `default:"1"`
+	WithCaller int    `default:"2"`
 }
 
 // NewConfig loads values from environment variables and returns loaded configuration.
