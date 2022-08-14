@@ -62,6 +62,8 @@ func (e *Exchange) dataLoop(ctx context.Context, data <-chan ExchangeState, cb t
 
 			return
 		}
+
+		atomic.StoreInt64(&e.timestamp, state.Unix)
 	}
 
 	for {

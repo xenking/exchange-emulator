@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	ErrNoData             = errors.New("no data")
+	ErrNoOrderData        = errors.New("no order data")
+	ErrNoPriceData        = errors.New("no price data")
 	ErrUnknownUser        = errors.New("unknown user")
 	ErrEmptyBalance       = errors.New("empty balance")
 	ErrNegativeBalance    = errors.New("negative balance")
@@ -81,7 +82,7 @@ func (c *Core) ExchangeInfo() (map[string]interface{}, error) {
 func (c *Core) GetPrice(symbol string) (decimal.Decimal, error) {
 	state := c.CurrState()
 	if state.Symbol == "" {
-		return decimal.Decimal{}, ErrNoData
+		return decimal.Decimal{}, ErrNoPriceData
 	}
 
 	log.Debug().Str("symbol", symbol).Float64("price", state.Close.InexactFloat64()).
@@ -180,7 +181,7 @@ func (c *Core) GetOrder(id string) (*Order, error) {
 
 	order, ok := c.orders[id]
 	if !ok {
-		return nil, ErrNoData
+		return nil, ErrNoOrderData
 	}
 
 	return order, nil
@@ -192,7 +193,7 @@ func (c *Core) CancelOrder(id string) (*Order, error) {
 
 	order, ok := c.orders[id]
 	if !ok {
-		return nil, ErrNoData
+		return nil, ErrNoOrderData
 	}
 	delete(c.orders, id)
 
@@ -250,6 +251,8 @@ func (c *Core) updateState(state ExchangeState) (updated bool) {
 		if err := c.updateBalance(order); err != nil {
 			log.Panic().Err(err).Str("order", order.Id).Msg("can't update balance")
 		}
+
+		order.TransactTime = c.exchange.ShiftTime()
 
 		c.orderCallback(order.Order)
 

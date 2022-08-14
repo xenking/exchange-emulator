@@ -48,7 +48,7 @@ type GRPCConfig struct {
 
 type LoggerConfig struct {
 	Level      string `default:"debug"`
-	WithCaller int    `default:"2"`
+	WithCaller int    `default:"1"`
 }
 
 // NewConfig loads values from environment variables and returns loaded configuration.
