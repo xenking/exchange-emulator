@@ -57,29 +57,48 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	wss := ws.New(ctx)
-	core.OnOrderUpdate(wss.OnOrderUpdate)
+	wsOrders := ws.New(ctx)
+	core.OnOrderUpdate(wsOrders.OnUserUpdate)
+	wsPrices := ws.New(ctx)
+	core.OnPriceUpdate(wsPrices.OnBroadcastUpdate)
+
 	srv := server.New(core, cfg.GRPC, cfg.Exchange.DataFile)
 
 	// Serve must be called before Ready
-	wssListener, err := upg.Listen("tcp", cfg.WS.Addr)
+	wssOrdersListener, err := upg.Listen("tcp", cfg.WS.OrdersAddr)
 	if err != nil {
-		log.Error().Err(err).Msg("can't listen")
+		log.Error().Err(err).Msg("can't listen ws orders")
+
+		return err
+	}
+
+	// Serve must be called before Ready
+	wssPricesListener, err := upg.Listen("tcp", cfg.WS.PricesAddr)
+	if err != nil {
+		log.Error().Err(err).Msg("can't listen ws prices")
 
 		return err
 	}
 
 	grpcListener, err := upg.Listen("tcp", cfg.GRPC.Addr)
 	if err != nil {
-		log.Error().Err(err).Msg("can't listen")
+		log.Error().Err(err).Msg("can't listen grpc")
 
 		return err
 	}
 
-	// run wss server
+	// run wss orders server
 	go func() {
-		log.Info().Msg("serving wss server")
-		if serveErr := wss.Serve(wssListener); serveErr != nil {
+		log.Info().Msg("serving wss orders server")
+		if serveErr := wsOrders.Serve(wssOrdersListener); serveErr != nil {
+			log.Error().Err(serveErr).Msg("wss server")
+		}
+	}()
+
+	// run wss prices server
+	go func() {
+		log.Info().Msg("serving wss prices server")
+		if serveErr := wsPrices.Serve(wssPricesListener); serveErr != nil {
 			log.Error().Err(serveErr).Msg("wss server")
 		}
 	}()

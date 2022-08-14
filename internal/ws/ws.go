@@ -10,9 +10,11 @@ import (
 	"github.com/segmentio/encoding/json"
 	"github.com/valyala/fasthttp"
 	"github.com/xenking/websocket"
-
-	"github.com/xenking/exchange-emulator/gen/proto/api"
 )
+
+type WithUserID interface {
+	GetUserId() string
+}
 
 type Server struct {
 	websocket.Server
@@ -34,8 +36,8 @@ func (s *Server) Serve(ln net.Listener) error {
 	return fasthttp.Serve(ln, s.Upgrade)
 }
 
-func (s *Server) OnOrderUpdate(order *api.Order) {
-	c, ok := s.clients.Get(order.UserId)
+func (s *Server) OnUserUpdate(update WithUserID) {
+	c, ok := s.clients.Get(update.GetUserId())
 	if !ok {
 		return
 	}
@@ -43,11 +45,24 @@ func (s *Server) OnOrderUpdate(order *api.Order) {
 	if !ok2 {
 		return
 	}
-	err := json.NewEncoder(conn).Encode(order)
+	err := json.NewEncoder(conn).Encode(update)
 	if err != nil {
 		_, _ = conn.Write(NewError(err).Bytes())
 
 		return
+	}
+}
+
+func (s *Server) OnBroadcastUpdate(obj interface{}) {
+	for kv := range s.clients.Iter() {
+		conn := kv.Value.(*websocket.Conn)
+
+		err := json.NewEncoder(conn).Encode(obj)
+		if err != nil {
+			_, _ = conn.Write(NewError(err).Bytes())
+
+			return
+		}
 	}
 }
 

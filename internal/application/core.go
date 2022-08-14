@@ -12,6 +12,7 @@ import (
 	"github.com/xenking/decimal"
 
 	"github.com/xenking/exchange-emulator/gen/proto/api"
+	"github.com/xenking/exchange-emulator/internal/ws"
 )
 
 var (
@@ -23,10 +24,11 @@ var (
 )
 
 type Core struct {
-	balances map[string]*api.Balances
-	orders   map[string]*Order
-	exchange *Exchange
-	callback func(order *api.Order)
+	balances      map[string]*api.Balances
+	orders        map[string]*Order
+	exchange      *Exchange
+	orderCallback func(order *api.Order)
+	priceCallback func(ticker *api.Ticker)
 
 	commission              decimal.Decimal
 	exchangeFile            string
@@ -58,8 +60,16 @@ func NewCore(exchangeFile string, commission decimal.Decimal, cancelDuration tim
 	}
 }
 
-func (c *Core) OnOrderUpdate(cb func(order *api.Order)) {
-	c.callback = cb
+func (c *Core) OnOrderUpdate(cb func(update ws.WithUserID)) {
+	c.orderCallback = func(order *api.Order) {
+		cb(order)
+	}
+}
+
+func (c *Core) OnPriceUpdate(cb func(obj interface{})) {
+	c.priceCallback = func(ticker *api.Ticker) {
+		cb(ticker)
+	}
 }
 
 func (c *Core) ExchangeInfo() (map[string]interface{}, error) {
@@ -133,6 +143,10 @@ func (c *Core) CreateOrder(user string, order *api.Order) (o *Order, err error) 
 	order.Status = api.OrderStatus_NEW
 	order.UserId = user
 
+	o = &Order{
+		Order: order,
+	}
+
 	o.price, err = decimal.NewFromString(order.GetPrice())
 	if err != nil {
 		return nil, err
@@ -143,7 +157,6 @@ func (c *Core) CreateOrder(user string, order *api.Order) (o *Order, err error) 
 	}
 
 	o.total = o.price.Mul(o.quantity)
-	o.Order = order
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -198,10 +211,21 @@ func (c *Core) updateState(state ExchangeState) (updated bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.priceCallback(&api.Ticker{
+		Symbol:      state.Symbol,
+		Open:        state.Open.String(),
+		High:        state.High.String(),
+		Low:         state.Low.String(),
+		Close:       state.Close.String(),
+		BaseVolume:  state.BaseVolume.String(),
+		QuoteVolume: state.AssetVolume.String(),
+		Trades:      state.Trades,
+		Unix:        state.Unix,
+	})
+
 	sides := 0
 
 	for _, order := range c.orders {
-
 		if sides == 0 && order.Side == api.OrderSide_BUY {
 			sides++
 		} else if sides == 1 && order.Side == api.OrderSide_SELL {
@@ -227,9 +251,7 @@ func (c *Core) updateState(state ExchangeState) (updated bool) {
 			log.Panic().Err(err).Str("order", order.Id).Msg("can't update balance")
 		}
 
-		if c.callback != nil {
-			c.callback(order.Order)
-		}
+		c.orderCallback(order.Order)
 
 		delete(c.orders, order.Id)
 	}

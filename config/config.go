@@ -37,7 +37,8 @@ type ExchangeConfig struct {
 }
 
 type WSConfig struct {
-	Addr string `default:":8000"`
+	OrdersAddr string `default:":8000"`
+	PricesAddr string `default:":8000"`
 }
 
 type GRPCConfig struct {

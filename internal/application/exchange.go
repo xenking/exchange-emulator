@@ -53,16 +53,16 @@ func (e *Exchange) dataLoop(ctx context.Context, data <-chan ExchangeState, cb t
 	var state ExchangeState
 	var states <-chan ExchangeState
 
-	//select {
-	//case <-ctx.Done():
-	//	return
-	//case state, opened = <-data:
-	//	if !opened {
-	//		log.Warn().Msg("exchange closed")
-	//
-	//		return
-	//	}
-	//}
+	select {
+	case <-ctx.Done():
+		return
+	case state, opened = <-data:
+		if !opened {
+			log.Warn().Msg("exchange closed")
+
+			return
+		}
+	}
 
 	for {
 		select {
