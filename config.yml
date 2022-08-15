@@ -7,16 +7,17 @@ log:
   level: debug
 
 ws:
-  orders_addr: ":8082"
-  prices_addr: ":8083"
+  orders_addr: ":8182"
+  prices_addr: ":8183"
 
 grpc:
-  addr: ":8081"
+  addr: ":8181"
   disable_auth: false
 
 exchange:
   data_file: "./data/Binance_ETHUSDT_minute.csv"
   info_file: "./data/exchange.json"
-  delay: 20ms
-  offset: 1597351740000
+  delay: 3ms
+#  offset: 1597351740000
+  offset: 1574851020000
   commission: 0.1

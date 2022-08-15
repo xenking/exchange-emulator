@@ -27,6 +27,7 @@ var (
 type Core struct {
 	balances      map[string]*api.Balances
 	orders        map[string]*Order
+	ordersIdx     []*Order
 	exchange      *Exchange
 	orderCallback func(order *api.Order)
 	priceCallback func(ticker *api.Ticker)
@@ -47,6 +48,7 @@ type Order struct {
 	price    decimal.Decimal
 	total    decimal.Decimal
 	quantity decimal.Decimal
+	mu       sync.Mutex
 }
 
 func NewCore(exchangeFile string, commission decimal.Decimal, cancelDuration time.Duration, cancelPricePercent int64) *Core {
@@ -158,6 +160,7 @@ func (c *Core) CreateOrder(user string, order *api.Order) (o *Order, err error) 
 	}
 
 	o.total = o.price.Mul(o.quantity)
+	o.Total = o.total.String()
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -168,6 +171,7 @@ func (c *Core) CreateOrder(user string, order *api.Order) (o *Order, err error) 
 	}
 
 	c.orders[order.GetId()] = o
+	c.ordersIdx = append(c.ordersIdx, o)
 
 	log.Debug().Str("order", order.GetId()).Str("symbol", order.Symbol).
 		Str("side", order.Side.String()).Msg("Order created")
@@ -195,7 +199,9 @@ func (c *Core) CancelOrder(id string) (*Order, error) {
 	if !ok {
 		return nil, ErrNoOrderData
 	}
+
 	delete(c.orders, id)
+	c.ordersIdx = deleteOrder(c.ordersIdx, id)
 
 	order.Status = api.OrderStatus_CANCELED
 
@@ -206,6 +212,16 @@ func (c *Core) CancelOrder(id string) (*Order, error) {
 		Str("side", order.Side.String()).Msg("Order canceled")
 
 	return order, nil
+}
+
+func deleteOrder(orders []*Order, id string) []*Order {
+	for i, o := range orders {
+		if o.Id == id {
+			return append(orders[:i], orders[i+1:]...)
+		}
+	}
+
+	return orders
 }
 
 func (c *Core) updateState(state ExchangeState) (updated bool) {
@@ -224,23 +240,14 @@ func (c *Core) updateState(state ExchangeState) (updated bool) {
 		Unix:        state.Unix,
 	})
 
-	sides := 0
-
-	for _, order := range c.orders {
-		if sides == 0 && order.Side == api.OrderSide_BUY {
-			sides++
-		} else if sides == 1 && order.Side == api.OrderSide_SELL {
-			sides++
-		}
-
+	for _, order := range c.ordersIdx {
 		if order.price.LessThan(state.Low) || order.price.GreaterThan(state.High) {
 			continue
 		}
 
-		if order.Side == api.OrderSide_BUY && order.total.GreaterThan(state.AssetVolume) ||
-			order.Side == api.OrderSide_SELL && order.total.GreaterThan(state.BaseVolume) {
-			log.Panic().Str("side", order.Side.String()).Str("total", order.Total).
-				Str("asset", state.AssetVolume.String()).Str("base", state.BaseVolume.String()).
+		if order.total.GreaterThan(state.AssetVolume) {
+			log.Panic().Str("side", order.Side.String()).Str("total", order.total.String()).
+				Str("asset", state.AssetVolume.String()).
 				Int64("ts", state.Unix).Msg("can't close order in one kline. Need to use PARTIAL_FILLED")
 		}
 
@@ -257,12 +264,16 @@ func (c *Core) updateState(state ExchangeState) (updated bool) {
 		c.orderCallback(order.Order)
 
 		delete(c.orders, order.Id)
+		deleteOrder(c.ordersIdx, order.Id)
 	}
 
 	return updated
 }
 
 func (c *Core) updateBalance(o *Order) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
 	balances, ok := c.balances[o.UserId]
 	if !ok {
 		return ErrEmptyBalance
@@ -356,11 +367,13 @@ func (c *Core) updateBalance(o *Order) error {
 			inputLocked = inputLocked.Sub(o.quantity)
 			outputFree = outputFree.Add(o.total.Sub(o.total.Mul(c.commission)))
 		}
+
 		if inputLocked.IsNegative() {
 			log.Error().Str("input.locked", input.Locked).Str("total", o.Total).Msg("order filled")
 
 			return ErrNegativeSubBalance
 		}
+
 		input.Locked = inputLocked.String()
 		output.Free = outputFree.String()
 	}
