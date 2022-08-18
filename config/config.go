@@ -16,24 +16,20 @@ type Config struct {
 
 	App      ApplicationConfig
 	Exchange ExchangeConfig
+	Parser   ParserConfig
 	Log      LoggerConfig
 	WS       WSConfig
 	GRPC     GRPCConfig
 }
 
 type ApplicationConfig struct {
-	Version                 string        `default:"v0.0.1"`
-	Name                    string        `default:"exchange-emulator"`
-	OrderExpiration         time.Duration `default:"24h"`
-	OrderExpirePricePercent int64         `default:"5"`
+	Version string `default:"v0.0.1"`
+	Name    string `default:"exchange-emulator"`
 }
 
 type ExchangeConfig struct {
-	DataFile   string
-	InfoFile   string        `default:"./data/exchange.json"`
-	Delay      time.Duration `default:"1ms"`
-	Offset     int64         `default:"0"`
-	Commission float64       `default:"0.1"`
+	InfoFile   string  `default:"./data/exchange.json"`
+	Commission float64 `default:"0.1"`
 }
 
 type WSConfig struct {
@@ -49,6 +45,12 @@ type GRPCConfig struct {
 type LoggerConfig struct {
 	Level      string `default:"debug"`
 	WithCaller int    `default:"1"`
+}
+
+type ParserConfig struct {
+	File   string
+	Delay  time.Duration `default:"3ms"`
+	Offset int64         `default:"0"`
 }
 
 // NewConfig loads values from environment variables and returns loaded configuration.

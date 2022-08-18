@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -10,45 +9,44 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const UserServerPrefix = "/server.api.User"
-
 type AuthInterceptor struct{}
 
-func NewAuthenticator() *AuthInterceptor {
-	return &AuthInterceptor{}
+func NewAuthenticator() AuthInterceptor {
+	return AuthInterceptor{}
 }
 
-// NewUnaryInterceptor authorization unary interceptor function to handle authorize per RPC call
-func (i *AuthInterceptor) NewUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if strings.HasPrefix(info.FullMethod, UserServerPrefix) {
-		if err := i.authorize(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	return handler(ctx, req)
-}
-
-func (i *AuthInterceptor) NewStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-	if strings.HasPrefix(info.FullMethod, UserServerPrefix) {
-		if err := i.authorize(ss.Context()); err != nil {
-			return err
-		}
+func (i AuthInterceptor) NewStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if err := i.authorize(ss.Context()); err != nil {
+		return err
 	}
 
 	return handler(srv, ss)
 }
 
-func (i *AuthInterceptor) authorize(ctx context.Context) error {
+func (i AuthInterceptor) authorize(ctx context.Context) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return status.Errorf(codes.Unauthenticated, "Failed to retrieve metadata")
+		return status.Errorf(codes.Unauthenticated, "failed to retrieve metadata")
 	}
 
 	user, ok := md["user"]
 	if !ok || len(user) == 0 || user[0] == "" {
-		return status.Errorf(codes.Unauthenticated, "UserID are required")
+		return status.Errorf(codes.Unauthenticated, "user id are required")
 	}
 
 	return nil
+}
+
+func getUserID(ctx context.Context) (string, error) {
+	md, exist := metadata.FromIncomingContext(ctx)
+	if !exist {
+		return "", status.Errorf(codes.Unauthenticated, "Context metadata not found in request")
+	}
+
+	userID, ok := md["user"]
+	if !ok || len(userID) == 0 || userID[0] == "" {
+		return "", status.Errorf(codes.Unauthenticated, "UserID are required")
+	}
+
+	return userID[0], nil
 }

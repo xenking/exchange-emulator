@@ -9,42 +9,41 @@ import "google/api/field_behavior.proto";
 
 option go_package = "github.com/xenking/exchange-emulator/api/proto;api";
 
-service Exchange {
-  rpc StartExchange(google.protobuf.Empty) returns (google.protobuf.Empty);
-
-  rpc StopExchange(google.protobuf.Empty) returns (google.protobuf.Empty);
-
-  rpc SetOffsetExchange(OffsetExchangeRequest) returns (google.protobuf.Empty);
+service Multiplex {
+  rpc StartExchange(stream Request) returns (stream Response);
 }
 
-message OffsetExchangeRequest {
-  int64 offset = 1;
+message Request {
+  oneof request {
+    Order create_order = 1;
+    OrderRequest get_order = 2;
+    OrderRequest cancel_order = 3;
+    google.protobuf.Empty get_balances = 4;
+    Balances set_balances = 5;
+    PriceRequest get_price = 6;
+    google.protobuf.Empty get_exchange_info = 7;
+  }
 }
 
-service Info {
-  rpc GetExchangeInfo(google.protobuf.Empty) returns (google.protobuf.Struct);
-
-  rpc GetPrice(GetPriceRequest) returns (GetPriceResponse);
+message Response {
+  oneof response {
+    Order create_order = 1;
+    Order get_order = 2;
+    google.protobuf.Empty cancel_order = 3;
+    Balances get_balances = 4;
+    google.protobuf.Empty set_balances = 5;
+    Price get_price = 6;
+    google.protobuf.Struct get_exchange_info = 7;
+    Error error = 8;
+  }
 }
 
-message GetPriceRequest {
+message PriceRequest {
   string symbol = 1;
 }
 
-message GetPriceResponse {
+message Price {
   string price = 1;
-}
-
-service User {
-  rpc GetBalance(google.protobuf.Empty) returns (Balances);
-
-  rpc SetBalance(Balances) returns (google.protobuf.Empty);
-
-  rpc CreateOrder(Order) returns (Order);
-
-  rpc GetOrder(OrderRequest) returns (Order);
-
-  rpc DeleteOrder(OrderRequest) returns (Order);
 }
 
 message Balances {
@@ -55,6 +54,10 @@ message Balance {
   string asset = 1;
   string free = 2 ;
   string locked = 3;
+}
+
+message OrderRequest {
+  string id = 1;
 }
 
 enum OrderType {
@@ -96,8 +99,8 @@ message Order {
   [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
-message OrderRequest {
-  string id = 1;
+message Error {
+  string message = 1;
 }
 
 message Ticker {

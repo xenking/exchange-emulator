@@ -1,12 +1,14 @@
-package application
+package parser
 
 import (
 	"context"
 	"io"
+	"os"
 	"time"
 
 	"github.com/xenking/decimal"
 
+	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/pkg/csv"
 	"github.com/xenking/exchange-emulator/pkg/utils"
 )
@@ -66,7 +68,34 @@ func (s *ExchangeState) UnmarshalCSV(_, v []string) error {
 	return err
 }
 
-func ParseCSV(ctx context.Context, r io.ReadCloser, delay time.Duration, offset int64) (<-chan ExchangeState, chan error) {
+type Listener struct {
+	data <-chan ExchangeState
+	errc chan error
+}
+
+func (p *Listener) ExchangeStates() <-chan ExchangeState {
+	return p.data
+}
+
+func (p *Listener) Errors() <-chan error {
+	return p.errc
+}
+
+func New(ctx context.Context, cfg config.ParserConfig) (*Listener, error) {
+	f, err := os.Open(cfg.File)
+	if err != nil {
+		return nil, err
+	}
+
+	data, errc := parser(ctx, f, cfg.Delay, cfg.Offset)
+
+	return &Listener{
+		data: data,
+		errc: errc,
+	}, nil
+}
+
+func parser(ctx context.Context, r io.ReadCloser, delay time.Duration, offset int64) (<-chan ExchangeState, chan error) {
 	states := make(chan ExchangeState)
 	errc := make(chan error)
 

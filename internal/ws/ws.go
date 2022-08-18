@@ -12,18 +12,16 @@ import (
 	"github.com/xenking/websocket"
 )
 
-type WithUserID interface {
-	GetUserId() string
-}
-
 type Server struct {
 	websocket.Server
-	clients *hashmap.HashMap // map[userId] *websocket.Conn
+	conns *hashmap.HashMap // map[userId]*UserConn
+	users chan *UserConn
 }
 
 func New(ctx context.Context) *Server {
 	s := &Server{
-		clients: &hashmap.HashMap{},
+		conns: &hashmap.HashMap{},
+		users: make(chan *UserConn),
 	}
 	s.Server.HandleOpen(s.OpenConn)
 	s.Server.HandleClose(s.CloseConn)
@@ -36,34 +34,12 @@ func (s *Server) Serve(ln net.Listener) error {
 	return fasthttp.Serve(ln, s.Upgrade)
 }
 
-func (s *Server) OnUserUpdate(update WithUserID) {
-	c, ok := s.clients.Get(update.GetUserId())
-	if !ok {
-		return
-	}
-	conn, ok2 := c.(*websocket.Conn)
-	if !ok2 {
-		return
-	}
-	err := json.NewEncoder(conn).Encode(update)
-	if err != nil {
-		_, _ = conn.Write(NewError(err).Bytes())
-
-		return
-	}
+func (s *Server) Users() <-chan *UserConn {
+	return s.users
 }
 
-func (s *Server) OnBroadcastUpdate(obj interface{}) {
-	for kv := range s.clients.Iter() {
-		conn := kv.Value.(*websocket.Conn)
-
-		err := json.NewEncoder(conn).Encode(obj)
-		if err != nil {
-			_, _ = conn.Write(NewError(err).Bytes())
-
-			return
-		}
-	}
+func (s *Server) Stop() {
+	close(s.users)
 }
 
 func (s *Server) OpenConn(conn *websocket.Conn) {
@@ -79,7 +55,17 @@ func (s *Server) CloseConn(conn *websocket.Conn, err error) {
 	if id == nil {
 		return
 	}
-	s.clients.Del(id)
+
+	uc, ok := s.conns.Get(id)
+	if !ok {
+		log.Error().Str("id", id.(string)).Msg("Get user conn failed")
+		return
+	}
+	s.conns.Del(id)
+
+	userConn := uc.(*UserConn)
+	close(userConn.close)
+
 	log.Info().Uint64("id", conn.ID()).Str("user", id.(string)).Msg("Close conn")
 }
 
@@ -116,7 +102,14 @@ func (s *Server) OnData(conn *websocket.Conn, _ bool, data []byte) {
 
 	conn.SetUserValue("init", true)
 	conn.SetUserValue("user", init.UserID)
-	s.clients.Set(init.UserID, conn)
+	uc := &UserConn{
+		conn:  conn,
+		ID:    init.UserID,
+		close: make(chan struct{}),
+	}
+	s.conns.Set(init.UserID, uc)
+	s.users <- uc
+
 	init.Initialized = true
 	log.Info().Uint64("id", conn.ID()).Str("user", init.UserID).Msg("Init conn")
 

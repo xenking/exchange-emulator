@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
+	"github.com/xenking/exchange-emulator/internal/app"
 	"os"
 	"time"
 
 	"github.com/cloudflare/tableflip"
 	"github.com/phuslu/log"
-	"github.com/xenking/decimal"
 	"google.golang.org/grpc/grpclog"
 
 	"github.com/xenking/exchange-emulator/config"
-	"github.com/xenking/exchange-emulator/internal/application"
 	"github.com/xenking/exchange-emulator/internal/server"
 	"github.com/xenking/exchange-emulator/internal/ws"
 	"github.com/xenking/exchange-emulator/pkg/logger"
@@ -47,22 +46,15 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		upg.Stop()
 	}()
 
-	core := application.NewCore(cfg.Exchange.InfoFile, decimal.NewFromFloat(cfg.Exchange.Commission),
-		cfg.App.OrderExpiration, cfg.App.OrderExpirePricePercent)
-	exchange := application.NewExchange()
-	err := core.SetExchange(ctx, exchange, cfg.Exchange.DataFile, cfg.Exchange.Delay, cfg.Exchange.Offset)
-	if err != nil {
-		log.Error().Err(err).Msg("can't init exchange")
+	wsOrders := ws.New(ctx)
+	wsPrices := ws.New(ctx)
 
+	application, err := app.New(wsOrders.Users(), wsPrices.Users(), cfg)
+	if err != nil {
 		return err
 	}
 
-	wsOrders := ws.New(ctx)
-	core.OnOrderUpdate(wsOrders.OnUserUpdate)
-	wsPrices := ws.New(ctx)
-	core.OnPriceUpdate(wsPrices.OnBroadcastUpdate)
-
-	srv := server.New(core, cfg.GRPC, cfg.Exchange.DataFile)
+	srv, err := server.New(application, cfg.GRPC, cfg.Exchange.InfoFile)
 
 	// Serve must be called before Ready
 	wssOrdersListener, err := upg.Listen("tcp", cfg.WS.OrdersAddr)
@@ -89,6 +81,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 
 	// run wss orders server
 	go func() {
+		defer wsOrders.Stop()
 		log.Info().Msg("serving wss orders server")
 		if serveErr := wsOrders.Serve(wssOrdersListener); serveErr != nil {
 			log.Error().Err(serveErr).Msg("wss server")
@@ -97,6 +90,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 
 	// run wss prices server
 	go func() {
+		defer wsPrices.Stop()
 		log.Info().Msg("serving wss prices server")
 		if serveErr := wsPrices.Serve(wssPricesListener); serveErr != nil {
 			log.Error().Err(serveErr).Msg("wss server")
@@ -110,6 +104,8 @@ func serve(ctx context.Context, cfg *config.Config) error {
 			log.Error().Err(serveErr).Msg("grpc server")
 		}
 	}()
+
+	go application.Start(ctx)
 
 	log.Info().Msg("service ready")
 	if upgErr := upg.Ready(); upgErr != nil {
