@@ -102,7 +102,7 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 		}
 
 		if appErr != nil {
-			resp.Response = &api.Response_Error{Error: &api.Error{Message: err.Error()}}
+			resp.Response = &api.Response_Error{Error: &api.Error{Message: appErr.Error()}}
 		}
 		if err = stream.Send(resp); err != nil {
 			return status.Errorf(codes.Internal, "can't send response: %v", err)

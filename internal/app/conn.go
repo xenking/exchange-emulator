@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 
+	"github.com/phuslu/log"
+
 	"github.com/xenking/exchange-emulator/internal/exchange"
 )
 
@@ -21,6 +23,7 @@ func (a *App) connWatcher(ctx context.Context) {
 			return
 		case conn := <-a.connections:
 			store = append(store, conn)
+			log.Trace().Str("id", conn.id).Msg("new exchange connection")
 		default:
 			for i := 0; i < len(store); i++ {
 				select {
@@ -30,6 +33,7 @@ func (a *App) connWatcher(ctx context.Context) {
 					a.clients.Del(store[i].id)
 					store[i].Close()
 
+					log.Debug().Str("id", store[i].id).Msg("exchange closed")
 					store = append(store[:i], store[i+1:]...)
 				}
 			}

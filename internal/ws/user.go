@@ -13,6 +13,10 @@ type UserConn struct {
 }
 
 func (c *UserConn) Send(data interface{}) error {
+	if c == nil {
+		return nil
+	}
+
 	err := json.NewEncoder(c.conn).Encode(data)
 	if err != nil {
 		_, _ = c.conn.Write(NewError(err).Bytes())

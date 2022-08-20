@@ -2,8 +2,10 @@ package exchange
 
 import (
 	"context"
+
 	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
+
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/gen/proto/api"
 	"github.com/xenking/exchange-emulator/internal/balance"
@@ -13,8 +15,8 @@ import (
 )
 
 type Client struct {
-	OrderConn *ws.UserConn
-	PriceConn *ws.UserConn
+	orderConn *ws.UserConn
+	priceConn *ws.UserConn
 
 	Parser  *parser.Listener
 	Balance *balance.Tracker
@@ -47,7 +49,7 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 		Parser:     p,
 		Balance:    b,
 		Order:      o,
-		actions:    make(chan Action, 10),
+		actions:    make(chan Action, 100),
 		close:      cancel,
 		commission: decimal.NewFromFloat(config.Exchange.Commission),
 	}
@@ -60,25 +62,45 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 func (c *Client) Start(ctx context.Context) {
 	states := c.Parser.ExchangeStates()
 
-	var opened bool
-	var state parser.ExchangeState
+	state, opened := <-states
+	if !opened {
+		log.Warn().Msg("exchange closed")
+		return
+	}
+
+	var currentStates <-chan parser.ExchangeState
+	var deletedOrders []string
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case act := <-c.actions:
+			state.Unix += 100 // add 100 ms time offset to prevent duplicate orders
+			log.Trace().Int64("ts", state.Unix).Msg("exchange action")
 			act(state)
-		case state, opened = <-states:
+		case <-c.Order.Control():
+			if currentStates != nil {
+				log.Debug().Msg("stop exchange")
+				currentStates = nil
+			} else {
+				log.Debug().Msg("start exchange")
+				currentStates = states
+			}
+		case state, opened = <-currentStates:
 			if !opened {
 				log.Warn().Msg("exchange closed")
-				return
+				currentStates = nil
 			}
 
-			if err := c.PriceConn.Send(state); err != nil {
-				log.Error().Err(err).Str("user", c.PriceConn.ID).Msg("can't send price state")
-				return
+			log.Trace().Int64("ts", state.Unix).Msg("exchange state")
+
+			if err := c.priceConn.Send(state); err != nil {
+				log.Error().Err(err).Str("user", c.priceConn.ID).Msg("can't send price state")
+				continue
 			}
+
+			deletedOrders = deletedOrders[:0]
 
 			c.Order.Range(func(orders []*order.Order) {
 				for _, o := range orders {
@@ -93,20 +115,47 @@ func (c *Client) Start(ctx context.Context) {
 
 					o.Status = api.OrderStatus_FILLED
 
+					log.Debug().Str("order", o.Id).Str("user", o.UserId).Str("symbol", o.Symbol).
+						Str("side", o.Side.String()).Msg("exchange: order filled")
+
 					if err := c.UpdateBalance(o); err != nil {
 						log.Error().Err(err).Str("user", o.UserId).Str("order", o.Id).Msg("can't update balance")
-
-						return
+						continue
 					}
 
-					if err := c.OrderConn.Send(o.Order); err != nil {
-						log.Error().Err(err).Str("user", c.OrderConn.ID).Str("order", o.Id).Msg("can't send order update")
+					deletedOrders = append(deletedOrders, o.Id)
 
-						return
+					if err := c.orderConn.Send(o.Order); err != nil {
+						log.Error().Err(err).Str("user", c.orderConn.ID).Str("order", o.Id).Msg("can't send order update")
+						continue
 					}
 				}
 			})
+
+			for _, o := range deletedOrders {
+				c.Order.Delete(o)
+			}
 		}
+	}
+}
+
+func (c *Client) SetOrdersConnection(conn *ws.UserConn) {
+	c.actions <- func(state parser.ExchangeState) {
+		if c.orderConn != nil {
+			c.orderConn.Close()
+		}
+
+		c.orderConn = conn
+	}
+}
+
+func (c *Client) SetPricesConnection(conn *ws.UserConn) {
+	c.actions <- func(state parser.ExchangeState) {
+		if c.priceConn != nil {
+			c.priceConn.Close()
+		}
+
+		c.priceConn = conn
 	}
 }
 
@@ -128,6 +177,23 @@ func (c *Client) NewAction(ctx context.Context, action Action) {
 	<-done
 }
 
+// UpdateBalance updates user balance for order
+// pair USDT ETH
+// NEW order
+// 1. BUY:  USDT free-total
+// 2. BUY:  USDT locked+total
+// 1. SELL: ETH  free-quantity
+// 2. SELL: ETH  locked+quantity
+// CANCEL order
+// 1. BUY:  USDT locked-total
+// 2. BUY:  USDT free+total
+// 1. SELL: ETH  locked-quantity
+// 2. SELL: ETH  free+quantity
+// FILL order
+// 1. BUY:  USDT locked-total
+// 2. BUY:  ETH  free+quantity
+// 1. SELL: ETH  locked-quantity
+// 2. SELL: USDT free+total
 func (c *Client) UpdateBalance(o *order.Order) error {
 	var base, quote string
 	if o.GetSide() == api.OrderSide_BUY {
@@ -165,7 +231,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 			}
 		}
 
-		if asset.Free.IsNegative() {
+		if asset.Free.IsNegative() || asset.Locked.IsNegative() {
 			log.Error().Str("asset", asset.Name).
 				Str("free", asset.Free.String()).
 				Str("locked", asset.Locked.String()).
@@ -173,7 +239,8 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 
 			return balance.ErrNegative
 		}
-		log.Info().Str("user", o.UserId).
+
+		log.Trace().Str("user", o.UserId).
 			Str("asset", asset.Name).
 			Str("free", asset.Free.String()).
 			Str("locked", asset.Locked.String()).
@@ -183,7 +250,6 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	if err != nil {
 		return err
 	}
-
 	if o.Status == api.OrderStatus_FILLED {
 		err = c.Balance.NewTransaction(quote, func(asset *balance.Asset) (err error) {
 			switch o.GetSide() {
@@ -192,7 +258,17 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 			case api.OrderSide_SELL:
 				asset.Free = asset.Free.Add(o.Total.Sub(o.Total.Mul(c.commission)))
 			}
-			log.Info().Str("user", o.UserId).
+
+			if asset.Free.IsNegative() || asset.Locked.IsNegative() {
+				log.Error().Str("asset", asset.Name).
+					Str("free", asset.Free.String()).
+					Str("locked", asset.Locked.String()).
+					Str("total", o.Total.String()).Msg("new order")
+
+				return balance.ErrNegative
+			}
+
+			log.Debug().Str("user", o.UserId).
 				Str("asset", asset.Name).
 				Str("free", asset.Free.String()).
 				Str("locked", asset.Locked.String()).

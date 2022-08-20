@@ -2,10 +2,12 @@ package order
 
 import (
 	"context"
-	"github.com/go-faster/errors"
 	"strings"
 
+	"github.com/go-faster/errors"
+	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
+
 	"github.com/xenking/exchange-emulator/gen/proto/api"
 )
 
@@ -20,16 +22,14 @@ type Order struct {
 
 type Tracker struct {
 	transactions chan transaction
-	iterations   chan func(data []*Order)
-	iterDone     chan struct{}
-	data         []*Order
+	signal       chan struct{}
+	active       []*Order
 }
 
 func New() *Tracker {
 	return &Tracker{
 		transactions: make(chan transaction),
-		iterations:   make(chan func(data []*Order)),
-		iterDone:     make(chan struct{}),
+		signal:       make(chan struct{}, 1),
 	}
 }
 
@@ -37,90 +37,93 @@ var (
 	ErrNotFound = errors.New("order not found")
 )
 
-type TransactionType int8
+type transactionType int8
 
 const (
-	TypeAdd TransactionType = iota + 1
-	TypeGet
-	TypeCancel
-	TypeUpdate
-	TypeRange
+	typeAdd transactionType = iota + 1
+	typeGet
+	typeCancel
+	typeUpdate
+	typeRange
 )
 
 type transaction struct {
-	action   func(data *Order) bool
-	iterator func(data []*Order)
-	ID       string
-	Type     TransactionType
+	action          func(data *Order) bool
+	id              string
+	transactionType transactionType
 }
 
 func (t *Tracker) Start(ctx context.Context) {
 	orderSequence := uint64(0)
 	data := make(map[string]*Order)
 
-	go t.iterator(ctx)
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case tt := <-t.transactions:
-			switch tt.Type {
-			case TypeAdd:
+			switch tt.transactionType {
+			case typeAdd:
+				// TODO: find out why we have zero order id
 				orderSequence++
 				order := &Order{
 					internalOrderID: orderSequence,
 				}
-
 				if !tt.action(order) {
 					continue
 				}
 
 				data[order.Id] = order
-				t.data = append(t.data, order)
-			case TypeGet:
-				order, _ := data[tt.ID]
+				t.active = append(t.active, order)
+
+				log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+					Int64("ts", order.TransactTime).Msg("order added")
+
+				if len(data) == 1 {
+					t.signal <- struct{}{}
+				}
+			case typeGet:
+				order, ok := data[tt.id]
 				tt.action(order)
-			case TypeCancel:
-				delete(data, tt.ID)
-				for i, o := range t.data {
-					if o.Id == tt.ID {
-						t.data = append(t.data[:i], t.data[i+1:]...)
+
+				if ok {
+					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+						Int64("ts", order.TransactTime).Msg("order get")
+				}
+			case typeCancel:
+				var order *Order
+				for i, o := range t.active {
+					if o.Id == tt.id {
+						order = o
+						t.active = append(t.active[:i], t.active[i+1:]...)
 						break
 					}
 				}
-				tt.action(nil)
-			case TypeUpdate:
-				order, _ := data[tt.ID]
-				tt.action(order)
-			case TypeRange:
-				select {
-				case <-ctx.Done():
-					return
-				case t.iterations <- tt.iterator:
-					select {
-					case <-ctx.Done():
-						return
-					case <-t.iterDone:
-					}
+
+				if order == nil {
+					order = data[tt.id]
 				}
-			}
-		}
-	}
-}
 
-func (t *Tracker) iterator(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case iterator := <-t.iterations:
-			iterator(t.data)
+				tt.action(order)
 
-			select {
-			case <-ctx.Done():
-				return
-			case t.iterDone <- struct{}{}:
+				if order != nil {
+					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+						Int64("ts", order.TransactTime).Msg("order deleted")
+				}
+
+				if len(data) == 0 {
+					t.signal <- struct{}{}
+				}
+			case typeUpdate:
+				order, ok := data[tt.id]
+				tt.action(order)
+				if ok {
+					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+						Int64("ts", order.TransactTime).Msg("order updated")
+				}
+			case typeRange:
+				tt.action(nil)
+				log.Trace().Msg("order range")
 			}
 		}
 	}
@@ -131,7 +134,7 @@ func (t *Tracker) Add(order *api.Order, timestamp int64) *Order {
 
 	errc := make(chan error)
 	t.transactions <- transaction{
-		Type: TypeAdd,
+		transactionType: typeAdd,
 		action: func(o *Order) bool {
 			defer close(errc)
 
@@ -173,8 +176,8 @@ func (t *Tracker) Add(order *api.Order, timestamp int64) *Order {
 func (t *Tracker) Get(id string) *Order {
 	resp := make(chan Order)
 	t.transactions <- transaction{
-		Type: TypeGet,
-		ID:   id,
+		transactionType: typeGet,
+		id:              id,
 		action: func(data *Order) bool {
 			if data != nil {
 				resp <- *data
@@ -191,14 +194,16 @@ func (t *Tracker) Get(id string) *Order {
 	return &order
 }
 
-func (t *Tracker) Cancel(id string) *Order {
+func (t *Tracker) Delete(id string) *Order {
 	var order *Order
 	done := make(chan struct{})
 	t.transactions <- transaction{
-		Type: TypeCancel,
-		ID:   id,
+		transactionType: typeCancel,
+		id:              id,
 		action: func(o *Order) bool {
 			order = o
+			order.Status = api.OrderStatus_CANCELED
+
 			close(done)
 			return true
 		},
@@ -211,8 +216,8 @@ func (t *Tracker) Cancel(id string) *Order {
 func (t *Tracker) Update(id string, cb func(o *Order) bool) {
 	done := make(chan struct{})
 	t.transactions <- transaction{
-		Type: TypeUpdate,
-		ID:   id,
+		transactionType: typeUpdate,
+		id:              id,
 		action: func(o *Order) bool {
 			ok := cb(o)
 			close(done)
@@ -226,11 +231,16 @@ func (t *Tracker) Update(id string, cb func(o *Order) bool) {
 func (t *Tracker) Range(cb func(order []*Order)) {
 	done := make(chan struct{})
 	t.transactions <- transaction{
-		Type: TypeRange,
-		iterator: func(data []*Order) {
-			cb(data)
+		transactionType: typeRange,
+		action: func(_ *Order) bool {
+			cb(t.active)
 			close(done)
+			return true
 		},
 	}
 	<-done
+}
+
+func (t *Tracker) Control() <-chan struct{} {
+	return t.signal
 }

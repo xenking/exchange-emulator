@@ -2,13 +2,13 @@ package app
 
 import (
 	"context"
-	"github.com/phuslu/log"
-	"github.com/xenking/exchange-emulator/internal/exchange"
-	"github.com/xenking/exchange-emulator/internal/ws"
 
 	"github.com/cornelk/hashmap"
+	"github.com/phuslu/log"
 
 	"github.com/xenking/exchange-emulator/config"
+	"github.com/xenking/exchange-emulator/internal/exchange"
+	"github.com/xenking/exchange-emulator/internal/ws"
 )
 
 type App struct {
@@ -46,11 +46,7 @@ func (a *App) Start(ctx context.Context) {
 				continue
 			}
 
-			if client.OrderConn != nil {
-				client.OrderConn.Close()
-			}
-
-			client.OrderConn = conn
+			client.SetOrdersConnection(conn)
 			a.connections <- clientConn{
 				close:  conn.CloseHandler(),
 				Client: client,
@@ -64,11 +60,7 @@ func (a *App) Start(ctx context.Context) {
 				continue
 			}
 
-			if client.PriceConn != nil {
-				client.PriceConn.Close()
-			}
-
-			client.PriceConn = conn
+			client.SetPricesConnection(conn)
 			a.connections <- clientConn{
 				close:  conn.CloseHandler(),
 				Client: client,
@@ -81,7 +73,7 @@ func (a *App) Start(ctx context.Context) {
 func (a *App) getUser(ctx context.Context, userID string) (*exchange.Client, error) {
 	c, ok := a.clients.Get(userID)
 	client, ok2 := c.(*exchange.Client)
-	if !ok || ok2 {
+	if !ok || !ok2 {
 		var err error
 		client, err = exchange.New(ctx, a.config)
 		if err != nil {
@@ -90,6 +82,7 @@ func (a *App) getUser(ctx context.Context, userID string) (*exchange.Client, err
 			return nil, err
 		}
 
+		log.Debug().Str("user", userID).Msg("new exchange client")
 		a.clients.Set(userID, client)
 	}
 

@@ -41,12 +41,14 @@ func (a *App) GetOrder(ctx context.Context, userID, orderID string) (*api.Order,
 	var resp *api.Order
 	user.NewAction(ctx, func(state parser.ExchangeState) {
 		o := user.Order.Get(orderID)
+		if o == nil {
+			err = order.ErrNotFound
+			return
+		}
+
 		resp = o.Order
 	})
 
-	if resp == nil {
-		err = order.ErrNotFound
-	}
 	return resp, err
 }
 
@@ -57,7 +59,7 @@ func (a *App) CancelOrder(ctx context.Context, userID, orderID string) error {
 	}
 
 	user.NewAction(ctx, func(state parser.ExchangeState) {
-		o := user.Order.Cancel(orderID)
+		o := user.Order.Delete(orderID)
 		if o == nil {
 			err = order.ErrNotFound
 			return
@@ -103,14 +105,8 @@ func (a *App) SetBalances(ctx context.Context, userID string, balances *api.Bala
 	bb := make([]balance.Asset, len(balances.Data))
 	for i, asset := range balances.Data {
 		bb[i].Name = asset.Asset
-		bb[i].Free, err = decimal.NewFromString(asset.Free)
-		if err != nil {
-			return err
-		}
-		bb[i].Locked, err = decimal.NewFromString(asset.Locked)
-		if err != nil {
-			return err
-		}
+		bb[i].Free, _ = decimal.NewFromString(asset.Free)
+		bb[i].Locked, _ = decimal.NewFromString(asset.Locked)
 	}
 
 	user.NewAction(ctx, func(state parser.ExchangeState) {
@@ -128,9 +124,7 @@ func (a *App) GetPrice(ctx context.Context, userID string, symbol string) (*api.
 
 	var price string
 	user.NewAction(ctx, func(state parser.ExchangeState) {
-		if symbol == state.Symbol {
-			price = state.Close.String()
-		}
+		price = state.Close.String()
 	})
 
 	return &api.Price{
