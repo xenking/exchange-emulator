@@ -22,7 +22,7 @@ type Tracker struct {
 
 func New() *Tracker {
 	return &Tracker{
-		transactions: make(chan transaction),
+		transactions: make(chan transaction, 200),
 		data:         make(map[string]*Asset),
 	}
 }

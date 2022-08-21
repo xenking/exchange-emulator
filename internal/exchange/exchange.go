@@ -49,7 +49,7 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 		Parser:     p,
 		Balance:    b,
 		Order:      o,
-		actions:    make(chan Action, 100),
+		actions:    make(chan Action, 200),
 		close:      cancel,
 		commission: decimal.NewFromFloat(config.Exchange.Commission),
 	}
@@ -68,6 +68,8 @@ func (c *Client) Start(ctx context.Context) {
 		return
 	}
 
+	stopped := true
+
 	var currentStates <-chan parser.ExchangeState
 	var deletedOrders []string
 
@@ -75,18 +77,28 @@ func (c *Client) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case act := <-c.actions:
-			state.Unix += 100 // add 100 ms time offset to prevent duplicate orders
-			log.Trace().Int64("ts", state.Unix).Msg("exchange action")
-			act(state)
 		case <-c.Order.Control():
 			if currentStates != nil {
 				log.Debug().Msg("stop exchange")
+				stopped = true
 				currentStates = nil
 			} else {
 				log.Debug().Msg("start exchange")
+				stopped = false
 				currentStates = states
 			}
+		case act := <-c.actions:
+			if !stopped {
+				if len(c.actions) > 0 {
+					currentStates = nil
+				} else {
+					currentStates = states
+				}
+			}
+
+			state.Unix += 100 // add 10 ms time offset to prevent duplicate orders
+			log.Trace().Int64("ts", state.Unix).Msg("exchange action")
+			act(state)
 		case state, opened = <-currentStates:
 			if !opened {
 				log.Warn().Msg("exchange closed")
@@ -116,7 +128,8 @@ func (c *Client) Start(ctx context.Context) {
 					o.Status = api.OrderStatus_FILLED
 
 					log.Debug().Str("order", o.Id).Str("user", o.UserId).Str("symbol", o.Symbol).
-						Str("side", o.Side.String()).Msg("exchange: order filled")
+						Str("side", o.Side.String()).Str("price", o.Order.Price).Str("qty", o.Order.Quantity).
+						Msg("order filled on exchange")
 
 					if err := c.UpdateBalance(o); err != nil {
 						log.Error().Err(err).Str("user", o.UserId).Str("order", o.Id).Msg("can't update balance")
@@ -177,6 +190,11 @@ func (c *Client) NewAction(ctx context.Context, action Action) {
 	<-done
 }
 
+var (
+	one     = decimal.NewFromInt(1)
+	percent = decimal.NewFromInt(100)
+)
+
 // UpdateBalance updates user balance for order
 // pair USDT ETH
 // NEW order
@@ -203,6 +221,9 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	}
 
 	err := c.Balance.NewTransaction(base, func(asset *balance.Asset) (err error) {
+		log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+			Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
+			Str("order", o.Id).Msg("started balance update")
 		switch o.GetStatus() {
 		case api.OrderStatus_NEW:
 			switch o.GetSide() {
@@ -210,8 +231,8 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 				asset.Free = asset.Free.Sub(o.Total)
 				asset.Locked = asset.Locked.Add(o.Total)
 			case api.OrderSide_SELL:
-				asset.Free.Sub(o.Quantity)
-				asset.Locked.Add(o.Quantity)
+				asset.Free = asset.Free.Sub(o.Quantity)
+				asset.Locked = asset.Locked.Add(o.Quantity)
 			}
 		case api.OrderStatus_FILLED:
 			switch o.GetSide() {
@@ -226,25 +247,22 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 				asset.Locked = asset.Locked.Sub(o.Total)
 				asset.Free = asset.Free.Add(o.Total)
 			case api.OrderSide_SELL:
-				asset.Locked.Sub(o.Quantity)
-				asset.Free.Add(o.Quantity)
+				asset.Locked = asset.Locked.Sub(o.Quantity)
+				asset.Free = asset.Free.Add(o.Quantity)
 			}
 		}
+		log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+			Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
+			Str("order", o.Id).Msg("finished balance update")
 
 		if asset.Free.IsNegative() || asset.Locked.IsNegative() {
 			log.Error().Str("asset", asset.Name).
 				Str("free", asset.Free.String()).
 				Str("locked", asset.Locked.String()).
-				Str("total", o.Total.String()).Msg("new order")
+				Str("total", o.Total.String()).Msg("balance update failed")
 
 			return balance.ErrNegative
 		}
-
-		log.Trace().Str("user", o.UserId).
-			Str("asset", asset.Name).
-			Str("free", asset.Free.String()).
-			Str("locked", asset.Locked.String()).
-			Msg("balance updated")
 		return
 	})
 	if err != nil {
@@ -254,16 +272,16 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 		err = c.Balance.NewTransaction(quote, func(asset *balance.Asset) (err error) {
 			switch o.GetSide() {
 			case api.OrderSide_BUY:
-				asset.Free = asset.Free.Add(o.Quantity.Sub(o.Quantity.Mul(c.commission)))
+				asset.Free = asset.Free.Add(o.Quantity.Mul(c.commission.Div(percent).Neg().Add(one)))
 			case api.OrderSide_SELL:
-				asset.Free = asset.Free.Add(o.Total.Sub(o.Total.Mul(c.commission)))
+				asset.Free = asset.Free.Add(o.Total.Mul(c.commission.Div(percent).Neg().Add(one)))
 			}
 
 			if asset.Free.IsNegative() || asset.Locked.IsNegative() {
 				log.Error().Str("asset", asset.Name).
 					Str("free", asset.Free.String()).
 					Str("locked", asset.Locked.String()).
-					Str("total", o.Total.String()).Msg("new order")
+					Str("total", o.Total.String()).Msg("balance update failed")
 
 				return balance.ErrNegative
 			}
