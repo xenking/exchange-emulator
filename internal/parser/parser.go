@@ -95,6 +95,10 @@ func New(ctx context.Context, cfg config.ParserConfig) (*Listener, error) {
 	}, nil
 }
 
+// TODO: switch to https://github.com/cristalhq/dsvreader
+// OR https://github.com/rovaughn/fastcsv
+// ALSO use this decimal library https://github.com/db47h/decimal/tree/math
+// OR THIS https://github.com/ericlagergren/decimal (need to fork)
 func parser(ctx context.Context, r io.ReadCloser, delay time.Duration, offset int64) (<-chan ExchangeState, chan error) {
 	states := make(chan ExchangeState)
 	errc := make(chan error)

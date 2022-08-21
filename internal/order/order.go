@@ -63,6 +63,8 @@ func (t *Tracker) Start(ctx context.Context) {
 			return
 		case tt := <-t.transactions:
 			switch tt.transactionType {
+			case typeRange:
+				tt.action(nil)
 			case typeAdd:
 				// TODO: find out why we have zero order id
 				orderSequence++
@@ -79,16 +81,8 @@ func (t *Tracker) Start(ctx context.Context) {
 				log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
 					Int64("ts", order.TransactTime).Msg("order added")
 
-				if len(data) == 1 {
+				if len(t.active) == 1 {
 					t.signal <- struct{}{}
-				}
-			case typeGet:
-				order, ok := data[tt.id]
-				tt.action(order)
-
-				if ok {
-					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
-						Int64("ts", order.TransactTime).Msg("order get")
 				}
 			case typeCancel:
 				var order *Order
@@ -100,10 +94,6 @@ func (t *Tracker) Start(ctx context.Context) {
 					}
 				}
 
-				if order == nil {
-					order = data[tt.id]
-				}
-
 				tt.action(order)
 
 				if order != nil {
@@ -111,7 +101,7 @@ func (t *Tracker) Start(ctx context.Context) {
 						Int64("ts", order.TransactTime).Msg("order deleted")
 				}
 
-				if len(data) == 0 {
+				if len(t.active) == 0 {
 					t.signal <- struct{}{}
 				}
 			case typeUpdate:
@@ -121,9 +111,14 @@ func (t *Tracker) Start(ctx context.Context) {
 					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
 						Int64("ts", order.TransactTime).Msg("order updated")
 				}
-			case typeRange:
-				tt.action(nil)
-				log.Trace().Msg("order range")
+			case typeGet:
+				order, ok := data[tt.id]
+				tt.action(order)
+
+				if ok {
+					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+						Int64("ts", order.TransactTime).Msg("order get")
+				}
 			}
 		}
 	}
@@ -194,15 +189,17 @@ func (t *Tracker) Get(id string) *Order {
 	return &order
 }
 
-func (t *Tracker) Delete(id string) *Order {
+func (t *Tracker) Cancel(id string) *Order {
 	var order *Order
 	done := make(chan struct{})
 	t.transactions <- transaction{
 		transactionType: typeCancel,
 		id:              id,
 		action: func(o *Order) bool {
-			order = o
-			order.Status = api.OrderStatus_CANCELED
+			if o != nil {
+				order = o
+				order.Status = api.OrderStatus_CANCELED
+			}
 
 			close(done)
 			return true

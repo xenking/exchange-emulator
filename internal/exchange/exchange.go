@@ -48,13 +48,12 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 	go o.Start(ctx)
 
 	ex := &Client{
-		Parser:           p,
-		Balance:          b,
-		Order:            o,
-		actions:          make(chan Action, 200),
-		close:            cancel,
-		commission:       decimal.NewFromFloat(config.Exchange.Commission),
-		nextActionTicker: time.NewTicker(config.Parser.Delay - (config.Parser.Delay / 4)),
+		Parser:     p,
+		Balance:    b,
+		Order:      o,
+		actions:    make(chan Action, 200),
+		close:      cancel,
+		commission: decimal.NewFromFloat(config.Exchange.Commission),
 	}
 
 	go ex.Start(ctx)
@@ -63,8 +62,6 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 }
 
 func (c *Client) Start(ctx context.Context) {
-	defer c.nextActionTicker.Stop()
-
 	states := c.Parser.ExchangeStates()
 
 	state, opened := <-states
@@ -98,21 +95,16 @@ func (c *Client) Start(ctx context.Context) {
 				select {
 				case <-ctx.Done():
 					return
-				case <-c.nextActionTicker.C:
-					select {
-					case <-ctx.Done():
-						return
-					case act, nextAction = <-c.actions:
-						if !nextAction {
-							log.Warn().Msg("actions closed")
-							break
-						}
-						state.Unix += 10 // add 10 ms time offset to prevent duplicate orders
-						log.Trace().Int64("ts", state.Unix).Msg("exchange action")
-						act(state)
-					default:
-						nextAction = false
+				case act, nextAction = <-c.actions:
+					if !nextAction {
+						log.Warn().Msg("actions closed")
+						break
 					}
+					state.Unix += 10 // add 10 ms time offset to prevent duplicate orders
+					log.Trace().Int64("ts", state.Unix).Msg("exchange action")
+					act(state)
+				default:
+					nextAction = false
 				}
 			}
 		case state, opened = <-currentStates:
@@ -162,7 +154,7 @@ func (c *Client) Start(ctx context.Context) {
 			})
 
 			for _, o := range deletedOrders {
-				c.Order.Delete(o)
+				c.Order.Cancel(o)
 			}
 		}
 	}
@@ -239,7 +231,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	err := c.Balance.NewTransaction(base, func(asset *balance.Asset) (err error) {
 		log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
 			Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
-			Str("order", o.Id).Msg("started balance update")
+			Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update started 1")
 		switch o.GetStatus() {
 		case api.OrderStatus_NEW:
 			switch o.GetSide() {
@@ -269,7 +261,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 		}
 		log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
 			Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
-			Str("order", o.Id).Msg("finished balance update")
+			Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update finished 1")
 
 		if asset.Free.IsNegative() || asset.Locked.IsNegative() {
 			log.Error().Str("asset", asset.Name).
@@ -286,6 +278,9 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	}
 	if o.Status == api.OrderStatus_FILLED {
 		err = c.Balance.NewTransaction(quote, func(asset *balance.Asset) (err error) {
+			log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+				Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
+				Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update started 2")
 			switch o.GetSide() {
 			case api.OrderSide_BUY:
 				asset.Free = asset.Free.Add(o.Quantity.Mul(c.commission.Div(percent).Neg().Add(one)))
@@ -302,11 +297,9 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 				return balance.ErrNegative
 			}
 
-			log.Debug().Str("user", o.UserId).
-				Str("asset", asset.Name).
-				Str("free", asset.Free.String()).
-				Str("locked", asset.Locked.String()).
-				Msg("balance updated")
+			log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+				Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
+				Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update finished 2")
 			return
 		})
 		if err != nil {

@@ -17,6 +17,8 @@ func (a *App) CreateOrder(ctx context.Context, userID string, apiOrder *api.Orde
 		return nil, err
 	}
 
+	apiOrder.UserId = userID
+
 	var resp *api.Order
 	user.NewAction(ctx, func(state parser.ExchangeState) {
 		o := user.Order.Add(apiOrder, state.Unix)
@@ -26,7 +28,19 @@ func (a *App) CreateOrder(ctx context.Context, userID string, apiOrder *api.Orde
 		}
 
 		err = user.UpdateBalance(o)
-		resp = o.Order
+		resp = &api.Order{
+			Id:           o.Id,
+			Symbol:       o.Symbol,
+			Side:         o.Side,
+			Type:         o.Type,
+			Price:        o.Order.Price,
+			Quantity:     o.Order.Quantity,
+			Total:        o.Order.Total,
+			Status:       o.Status,
+			OrderId:      o.OrderId,
+			UserId:       o.UserId,
+			TransactTime: o.TransactTime,
+		}
 	})
 
 	return resp, err
@@ -42,6 +56,8 @@ func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.
 
 	user.NewAction(ctx, func(state parser.ExchangeState) {
 		for i, apiOrder := range apiOrders {
+			apiOrder.UserId = userID
+
 			o := user.Order.Add(apiOrder, state.Unix)
 			if o == nil {
 				err = order.ErrNotFound
@@ -49,7 +65,19 @@ func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.
 			}
 
 			err = user.UpdateBalance(o)
-			resp[i] = o.Order
+			resp[i] = &api.Order{
+				Id:           o.Id,
+				Symbol:       o.Symbol,
+				Side:         o.Side,
+				Type:         o.Type,
+				Price:        o.Order.Price,
+				Quantity:     o.Order.Quantity,
+				Total:        o.Order.Total,
+				Status:       o.Status,
+				OrderId:      o.OrderId,
+				UserId:       o.UserId,
+				TransactTime: o.TransactTime,
+			}
 		}
 	})
 
@@ -70,7 +98,19 @@ func (a *App) GetOrder(ctx context.Context, userID, orderID string) (*api.Order,
 			return
 		}
 
-		resp = o.Order
+		resp = &api.Order{
+			Id:           o.Id,
+			Symbol:       o.Symbol,
+			Side:         o.Side,
+			Type:         o.Type,
+			Price:        o.Order.Price,
+			Quantity:     o.Order.Quantity,
+			Total:        o.Order.Total,
+			Status:       o.Status,
+			OrderId:      o.OrderId,
+			UserId:       o.UserId,
+			TransactTime: o.TransactTime,
+		}
 	})
 
 	return resp, err
@@ -83,7 +123,7 @@ func (a *App) CancelOrder(ctx context.Context, userID, orderID string) error {
 	}
 
 	user.NewAction(ctx, func(state parser.ExchangeState) {
-		o := user.Order.Delete(orderID)
+		o := user.Order.Cancel(orderID)
 		if o == nil {
 			err = order.ErrNotFound
 			return
@@ -103,7 +143,7 @@ func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string
 
 	user.NewAction(ctx, func(state parser.ExchangeState) {
 		for _, orderID := range orderIDs {
-			o := user.Order.Delete(orderID)
+			o := user.Order.Cancel(orderID)
 			if o == nil {
 				err = order.ErrNotFound
 				return

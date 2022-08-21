@@ -92,7 +92,7 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 			resp.Response = &api.Response_CancelOrder{CancelOrder: &emptypb.Empty{}}
 		case *api.Request_CancelOrders:
 			appErr = s.app.CancelOrders(ctx, userID, req.CancelOrders.GetIds())
-			resp.Response = &api.Response_CancelOrder{CancelOrder: &emptypb.Empty{}}
+			resp.Response = &api.Response_CancelOrders{CancelOrders: &emptypb.Empty{}}
 		case *api.Request_GetBalances:
 			var balances *api.Balances
 			balances, appErr = s.app.GetBalances(ctx, userID)
