@@ -16,25 +16,29 @@ service Multiplex {
 message Request {
   oneof request {
     Order create_order = 1;
-    OrderRequest get_order = 2;
-    OrderRequest cancel_order = 3;
-    google.protobuf.Empty get_balances = 4;
-    Balances set_balances = 5;
-    PriceRequest get_price = 6;
-    google.protobuf.Empty get_exchange_info = 7;
+    Orders create_orders = 2;
+    OrderRequest get_order = 3;
+    OrderRequest cancel_order = 4;
+    OrderRequests cancel_orders = 5;
+    google.protobuf.Empty get_balances = 6;
+    Balances set_balances = 7;
+    PriceRequest get_price = 8;
+    google.protobuf.Empty get_exchange_info = 9;
   }
 }
 
 message Response {
   oneof response {
     Order create_order = 1;
-    Order get_order = 2;
-    google.protobuf.Empty cancel_order = 3;
-    Balances get_balances = 4;
-    google.protobuf.Empty set_balances = 5;
-    Price get_price = 6;
-    google.protobuf.Struct get_exchange_info = 7;
-    Error error = 8;
+    Orders create_orders = 2;
+    Order get_order = 3;
+    google.protobuf.Empty cancel_order = 4;
+    google.protobuf.Empty cancel_orders = 5;
+    Balances get_balances = 6;
+    google.protobuf.Empty set_balances = 7;
+    Price get_price = 8;
+    google.protobuf.Struct get_exchange_info = 9;
+    Error error = 10;
   }
 }
 
@@ -54,6 +58,14 @@ message Balance {
   string asset = 1;
   string free = 2 ;
   string locked = 3;
+}
+
+message Orders {
+  repeated Order orders = 1;
+}
+
+message OrderRequests {
+  repeated string ids = 1;
 }
 
 message OrderRequest {

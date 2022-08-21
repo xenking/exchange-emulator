@@ -79,12 +79,19 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 			var order *api.Order
 			order, appErr = s.app.CreateOrder(ctx, userID, req.CreateOrder)
 			resp.Response = &api.Response_CreateOrder{CreateOrder: order}
+		case *api.Request_CreateOrders:
+			var orders []*api.Order
+			orders, appErr = s.app.CreateOrders(ctx, userID, req.CreateOrders.GetOrders())
+			resp.Response = &api.Response_CreateOrders{CreateOrders: &api.Orders{Orders: orders}}
 		case *api.Request_GetOrder:
 			var order *api.Order
 			order, appErr = s.app.GetOrder(ctx, userID, req.GetOrder.GetId())
 			resp.Response = &api.Response_GetOrder{GetOrder: order}
 		case *api.Request_CancelOrder:
 			appErr = s.app.CancelOrder(ctx, userID, req.CancelOrder.GetId())
+			resp.Response = &api.Response_CancelOrder{CancelOrder: &emptypb.Empty{}}
+		case *api.Request_CancelOrders:
+			appErr = s.app.CancelOrders(ctx, userID, req.CancelOrders.GetIds())
 			resp.Response = &api.Response_CancelOrder{CancelOrder: &emptypb.Empty{}}
 		case *api.Request_GetBalances:
 			var balances *api.Balances

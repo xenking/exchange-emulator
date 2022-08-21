@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"time"
 
 	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
@@ -22,9 +23,10 @@ type Client struct {
 	Balance *balance.Tracker
 	Order   *order.Tracker
 
-	commission decimal.Decimal
-	actions    chan Action
-	close      context.CancelFunc
+	commission       decimal.Decimal
+	actions          chan Action
+	nextActionTicker *time.Ticker
+	close            context.CancelFunc
 }
 
 type Action func(parser.ExchangeState)
@@ -46,12 +48,13 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 	go o.Start(ctx)
 
 	ex := &Client{
-		Parser:     p,
-		Balance:    b,
-		Order:      o,
-		actions:    make(chan Action, 200),
-		close:      cancel,
-		commission: decimal.NewFromFloat(config.Exchange.Commission),
+		Parser:           p,
+		Balance:          b,
+		Order:            o,
+		actions:          make(chan Action, 200),
+		close:            cancel,
+		commission:       decimal.NewFromFloat(config.Exchange.Commission),
+		nextActionTicker: time.NewTicker(config.Parser.Delay - (config.Parser.Delay / 4)),
 	}
 
 	go ex.Start(ctx)
@@ -60,6 +63,8 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 }
 
 func (c *Client) Start(ctx context.Context) {
+	defer c.nextActionTicker.Stop()
+
 	states := c.Parser.ExchangeStates()
 
 	state, opened := <-states
@@ -67,8 +72,6 @@ func (c *Client) Start(ctx context.Context) {
 		log.Warn().Msg("exchange closed")
 		return
 	}
-
-	stopped := true
 
 	var currentStates <-chan parser.ExchangeState
 	var deletedOrders []string
@@ -80,25 +83,38 @@ func (c *Client) Start(ctx context.Context) {
 		case <-c.Order.Control():
 			if currentStates != nil {
 				log.Debug().Msg("stop exchange")
-				stopped = true
 				currentStates = nil
 			} else {
 				log.Debug().Msg("start exchange")
-				stopped = false
 				currentStates = states
 			}
 		case act := <-c.actions:
-			if !stopped {
-				if len(c.actions) > 0 {
-					currentStates = nil
-				} else {
-					currentStates = states
-				}
-			}
-
-			state.Unix += 100 // add 10 ms time offset to prevent duplicate orders
+			state.Unix += 10 // add 10 ms time offset to prevent duplicate orders
 			log.Trace().Int64("ts", state.Unix).Msg("exchange action")
 			act(state)
+
+			nextAction := true
+			for nextAction {
+				select {
+				case <-ctx.Done():
+					return
+				case <-c.nextActionTicker.C:
+					select {
+					case <-ctx.Done():
+						return
+					case act, nextAction = <-c.actions:
+						if !nextAction {
+							log.Warn().Msg("actions closed")
+							break
+						}
+						state.Unix += 10 // add 10 ms time offset to prevent duplicate orders
+						log.Trace().Int64("ts", state.Unix).Msg("exchange action")
+						act(state)
+					default:
+						nextAction = false
+					}
+				}
+			}
 		case state, opened = <-currentStates:
 			if !opened {
 				log.Warn().Msg("exchange closed")

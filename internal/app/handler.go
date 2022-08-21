@@ -32,6 +32,30 @@ func (a *App) CreateOrder(ctx context.Context, userID string, apiOrder *api.Orde
 	return resp, err
 }
 
+func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.Order) ([]*api.Order, error) {
+	user, err := a.getUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	resp := make([]*api.Order, len(apiOrders))
+
+	user.NewAction(ctx, func(state parser.ExchangeState) {
+		for i, apiOrder := range apiOrders {
+			o := user.Order.Add(apiOrder, state.Unix)
+			if o == nil {
+				err = order.ErrNotFound
+				return
+			}
+
+			err = user.UpdateBalance(o)
+			resp[i] = o.Order
+		}
+	})
+
+	return resp, err
+}
+
 func (a *App) GetOrder(ctx context.Context, userID, orderID string) (*api.Order, error) {
 	user, err := a.getUser(ctx, userID)
 	if err != nil {
@@ -66,6 +90,27 @@ func (a *App) CancelOrder(ctx context.Context, userID, orderID string) error {
 		}
 
 		err = user.UpdateBalance(o)
+	})
+
+	return err
+}
+
+func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string) error {
+	user, err := a.getUser(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	user.NewAction(ctx, func(state parser.ExchangeState) {
+		for _, orderID := range orderIDs {
+			o := user.Order.Delete(orderID)
+			if o == nil {
+				err = order.ErrNotFound
+				return
+			}
+
+			err = user.UpdateBalance(o)
+		}
 	})
 
 	return err
