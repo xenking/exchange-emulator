@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,11 +11,20 @@ import (
 	"github.com/cristalhq/aconfig"
 	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
+
+	_ "net/http/pprof"
 )
 
 func main() {
 	ctx, cancel := appContext()
 	defer cancel()
+
+	go func() {
+		err := http.ListenAndServe(":4001", nil)
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	if err := runMain(ctx, os.Args[1:]); err != nil {
 		log.Error().Err(err).Stack().Msg("main")
