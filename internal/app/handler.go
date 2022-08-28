@@ -12,7 +12,7 @@ import (
 )
 
 func (a *App) CreateOrder(ctx context.Context, userID string, apiOrder *api.Order) (*api.Order, error) {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (a *App) CreateOrder(ctx context.Context, userID string, apiOrder *api.Orde
 }
 
 func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.Order) ([]*api.Order, error) {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,10 +55,12 @@ func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.
 	resp := make([]*api.Order, len(apiOrders))
 
 	user.NewAction(ctx, func(state parser.ExchangeState) {
+		unix := state.Unix
 		for i, apiOrder := range apiOrders {
 			apiOrder.UserId = userID
+			unix += 10 // add 10 ms time offset to prevent duplicate orders
 
-			o := user.Order.Add(apiOrder, state.Unix)
+			o := user.Order.Add(apiOrder, unix)
 			if o == nil {
 				err = order.ErrNotFound
 				return
@@ -85,7 +87,7 @@ func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.
 }
 
 func (a *App) GetOrder(ctx context.Context, userID, orderID string) (*api.Order, error) {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func (a *App) GetOrder(ctx context.Context, userID, orderID string) (*api.Order,
 }
 
 func (a *App) CancelOrder(ctx context.Context, userID, orderID string) error {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -136,7 +138,7 @@ func (a *App) CancelOrder(ctx context.Context, userID, orderID string) error {
 }
 
 func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string) error {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -157,7 +159,7 @@ func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string
 }
 
 func (a *App) GetBalances(ctx context.Context, userID string) (*api.Balances, error) {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +184,7 @@ func (a *App) GetBalances(ctx context.Context, userID string) (*api.Balances, er
 }
 
 func (a *App) SetBalances(ctx context.Context, userID string, balances *api.Balances) error {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return err
 	}
@@ -202,7 +204,7 @@ func (a *App) SetBalances(ctx context.Context, userID string, balances *api.Bala
 }
 
 func (a *App) GetPrice(ctx context.Context, userID string, symbol string) (*api.Price, error) {
-	user, err := a.getUser(ctx, userID)
+	user, err := a.getClient(ctx, userID)
 	if err != nil {
 		return nil, err
 	}

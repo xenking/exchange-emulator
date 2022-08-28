@@ -20,7 +20,6 @@ func (c *UserConn) Send(data interface{}) error {
 	err := json.NewEncoder(c.conn).Encode(data)
 	if err != nil {
 		_, _ = c.conn.Write(NewError(err).Bytes())
-
 	}
 
 	return err
@@ -31,10 +30,18 @@ func (c *UserConn) SendError(err error) {
 }
 
 func (c *UserConn) Close() error {
+	if c == nil {
+		return nil
+	}
+
 	defer close(c.close)
+
 	return c.conn.Close()
 }
 
 func (c *UserConn) CloseHandler() <-chan struct{} {
+	if c == nil {
+		return nil
+	}
 	return c.close
 }

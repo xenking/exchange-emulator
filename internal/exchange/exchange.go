@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"context"
-	"time"
 
 	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
@@ -16,17 +15,16 @@ import (
 )
 
 type Client struct {
-	orderConn *ws.UserConn
-	priceConn *ws.UserConn
-
 	Parser  *parser.Listener
 	Balance *balance.Tracker
 	Order   *order.Tracker
 
-	commission       decimal.Decimal
-	actions          chan Action
-	nextActionTicker *time.Ticker
-	close            context.CancelFunc
+	orderConn *ws.UserConn
+	priceConn *ws.UserConn
+
+	commission decimal.Decimal
+	actions    chan Action
+	cancel     context.CancelFunc
 }
 
 type Action func(parser.ExchangeState)
@@ -52,7 +50,7 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 		Balance:    b,
 		Order:      o,
 		actions:    make(chan Action, 200),
-		close:      cancel,
+		cancel:     cancel,
 		commission: decimal.NewFromFloat(config.Exchange.Commission),
 	}
 
@@ -62,6 +60,8 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 }
 
 func (c *Client) Start(ctx context.Context) {
+	defer c.Close()
+
 	states := c.Parser.ExchangeStates()
 
 	state, opened := <-states
@@ -76,6 +76,12 @@ func (c *Client) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-c.orderConn.CloseHandler():
+			log.Warn().Msg("orders connection closed")
+			return
+		case <-c.priceConn.CloseHandler():
+			log.Warn().Msg("prices connection closed")
 			return
 		case <-c.Order.Control():
 			if currentStates != nil {
@@ -111,6 +117,7 @@ func (c *Client) Start(ctx context.Context) {
 			if !opened {
 				log.Warn().Msg("exchange closed")
 				currentStates = nil
+				return
 			}
 
 			log.Trace().Int64("ts", state.Unix).Msg("exchange state")
@@ -124,7 +131,18 @@ func (c *Client) Start(ctx context.Context) {
 
 			c.Order.Range(func(orders []*order.Order) {
 				for _, o := range orders {
-					if o.Price.LessThan(state.Low) || o.Price.GreaterThan(state.High) {
+					// buy
+					// price=10, high=12, low=9 -> bought
+					// price=10, high=15, low=11 -> continue
+					// price=10, high=9, low=8 -> bought
+					// price >= low
+					// sell
+					// price=10, high=12, low=9 -> sold
+					// price=10, high=15, low=11 -> sold
+					// price=10, high=9, low=8 -> continue
+					// price <= high
+					if o.Side == api.OrderSide_BUY && o.Price.LessThan(state.Low) ||
+						o.Side == api.OrderSide_SELL && o.Price.GreaterThan(state.High) {
 						continue
 					}
 					if o.Total.GreaterThan(state.AssetVolume) {
@@ -153,8 +171,13 @@ func (c *Client) Start(ctx context.Context) {
 				}
 			})
 
-			for _, o := range deletedOrders {
-				c.Order.Cancel(o)
+			switch len(deletedOrders) {
+			case 0:
+				continue
+			case 1:
+				c.Order.Cancel(deletedOrders[0])
+			default:
+				c.Order.RemoveRange(deletedOrders)
 			}
 		}
 	}
@@ -181,8 +204,10 @@ func (c *Client) SetPricesConnection(conn *ws.UserConn) {
 }
 
 func (c *Client) Close() {
-	c.close()
+	c.cancel()
 	close(c.actions)
+	c.orderConn.Close()
+	c.priceConn.Close()
 }
 
 func (c *Client) NewAction(ctx context.Context, action Action) {

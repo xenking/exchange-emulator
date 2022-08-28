@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,8 +12,6 @@ import (
 	"github.com/cristalhq/aconfig"
 	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
-
-	_ "net/http/pprof"
 )
 
 func main() {

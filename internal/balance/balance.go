@@ -5,7 +5,6 @@ import (
 
 	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
-
 	"github.com/xenking/decimal"
 )
 
@@ -65,9 +64,7 @@ func (t *Tracker) Start(ctx context.Context) {
 	}
 }
 
-var (
-	ErrNegative = errors.New("balance is negative")
-)
+var ErrNegative = errors.New("balance is negative")
 
 func (t *Tracker) NewTransaction(asset string, f func(data *Asset) error) error {
 	errc := make(chan error)

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-
 	"github.com/cornelk/hashmap"
 	"github.com/phuslu/log"
 
@@ -12,34 +11,32 @@ import (
 )
 
 type App struct {
-	config      *config.Config
-	clients     *hashmap.HashMap // map[id]*Client
-	orders      <-chan *ws.UserConn
-	prices      <-chan *ws.UserConn
-	connections chan clientConn
+	config  *config.Config
+	orders  <-chan *ws.UserConn
+	prices  <-chan *ws.UserConn
+	close   chan chan (<-chan struct{})
+	clients *hashmap.HashMap // map[string]*exchange.Client
 }
 
 func New(orders, prices <-chan *ws.UserConn, cfg *config.Config) (*App, error) {
 	app := &App{
-		config:      cfg,
-		clients:     &hashmap.HashMap{},
-		orders:      orders,
-		prices:      prices,
-		connections: make(chan clientConn, 10),
+		config:  cfg,
+		orders:  orders,
+		prices:  prices,
+		clients: &hashmap.HashMap{},
+		close:   make(chan chan (<-chan struct{}), 10),
 	}
 
 	return app, nil
 }
 
 func (a *App) Start(ctx context.Context) {
-	go a.connWatcher(ctx)
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case conn := <-a.orders:
-			client, err := a.getUser(ctx, conn.ID)
+			client, err := a.getClient(ctx, conn.ID)
 			if err != nil {
 				conn.SendError(err)
 				conn.Close()
@@ -47,13 +44,8 @@ func (a *App) Start(ctx context.Context) {
 			}
 
 			client.SetOrdersConnection(conn)
-			a.connections <- clientConn{
-				close:  conn.CloseHandler(),
-				Client: client,
-				id:     conn.ID,
-			}
 		case conn := <-a.prices:
-			client, err := a.getUser(ctx, conn.ID)
+			client, err := a.getClient(ctx, conn.ID)
 			if err != nil {
 				conn.SendError(err)
 				conn.Close()
@@ -61,16 +53,11 @@ func (a *App) Start(ctx context.Context) {
 			}
 
 			client.SetPricesConnection(conn)
-			a.connections <- clientConn{
-				close:  conn.CloseHandler(),
-				Client: client,
-				id:     conn.ID,
-			}
 		}
 	}
 }
 
-func (a *App) getUser(ctx context.Context, userID string) (*exchange.Client, error) {
+func (a *App) getClient(ctx context.Context, userID string) (*exchange.Client, error) {
 	c, ok := a.clients.Get(userID)
 	client, ok2 := c.(*exchange.Client)
 	if !ok || !ok2 {

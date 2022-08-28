@@ -29,13 +29,11 @@ type Tracker struct {
 func New() *Tracker {
 	return &Tracker{
 		transactions: make(chan transaction, 200),
-		signal:       make(chan struct{}, 1),
+		signal:       make(chan struct{}, 10),
 	}
 }
 
-var (
-	ErrNotFound = errors.New("order not found")
-)
+var ErrNotFound = errors.New("order not found")
 
 type transactionType int8
 
@@ -43,6 +41,7 @@ const (
 	typeAdd transactionType = iota + 1
 	typeGet
 	typeCancel
+	typeRemoveRange
 	typeUpdate
 	typeRange
 )
@@ -65,8 +64,13 @@ func (t *Tracker) Start(ctx context.Context) {
 			switch tt.transactionType {
 			case typeRange:
 				tt.action(nil)
+			case typeRemoveRange:
+				tt.action(nil)
+
+				if len(t.active) == 0 {
+					t.signal <- struct{}{}
+				}
 			case typeAdd:
-				// TODO: find out why we have zero order id
 				orderSequence++
 				order := &Order{
 					internalOrderID: orderSequence,
@@ -231,6 +235,28 @@ func (t *Tracker) Range(cb func(order []*Order)) {
 		transactionType: typeRange,
 		action: func(_ *Order) bool {
 			cb(t.active)
+			close(done)
+			return true
+		},
+	}
+	<-done
+}
+
+func (t *Tracker) RemoveRange(orders []string) {
+	done := make(chan struct{})
+	t.transactions <- transaction{
+		transactionType: typeRemoveRange,
+		action: func(_ *Order) bool {
+			index := make(map[string]struct{}, len(orders))
+			for _, order := range orders {
+				index[order] = struct{}{}
+			}
+
+			for i := len(t.active) - 1; i >= 0; i-- {
+				if _, ok := index[t.active[i].Id]; ok {
+					t.active = append(t.active[:i], t.active[i+1:]...)
+				}
+			}
 			close(done)
 			return true
 		},

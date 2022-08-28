@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/xenking/exchange-emulator/internal/app"
 	"os"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"google.golang.org/grpc/grpclog"
 
 	"github.com/xenking/exchange-emulator/config"
+	"github.com/xenking/exchange-emulator/internal/app"
 	"github.com/xenking/exchange-emulator/internal/server"
 	"github.com/xenking/exchange-emulator/internal/ws"
 	"github.com/xenking/exchange-emulator/pkg/logger"
