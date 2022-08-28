@@ -11,6 +11,7 @@ pt_spec_path = ./api/proto/*.proto
 generate: ## Generate models
 	rm -rf ./gen/proto/api/*
 	protoc  -I ./api/proto/include \
+			-I ./api/proto \
 			--proto_path=api/proto \
 			--go_out=$(pt_gen_path) \
 			--go_opt paths=source_relative \

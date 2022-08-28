@@ -22,9 +22,10 @@ type Client struct {
 	orderConn *ws.UserConn
 	priceConn *ws.UserConn
 
-	commission decimal.Decimal
-	actions    chan Action
-	cancel     context.CancelFunc
+	commission    decimal.Decimal
+	actions       chan Action
+	cancel        context.CancelFunc
+	cancelHandler func(state parser.ExchangeState)
 }
 
 type Action func(parser.ExchangeState)
@@ -63,7 +64,6 @@ func (c *Client) Start(ctx context.Context) {
 	defer c.Close()
 
 	states := c.Parser.ExchangeStates()
-
 	state, opened := <-states
 	if !opened {
 		log.Warn().Msg("exchange closed")
@@ -72,6 +72,7 @@ func (c *Client) Start(ctx context.Context) {
 
 	var currentStates <-chan parser.ExchangeState
 	var deletedOrders []string
+	var lastState parser.ExchangeState
 
 	for {
 		select {
@@ -117,8 +118,12 @@ func (c *Client) Start(ctx context.Context) {
 			if !opened {
 				log.Warn().Msg("exchange closed")
 				currentStates = nil
+				if c.cancelHandler != nil {
+					c.cancelHandler(lastState)
+				}
 				return
 			}
+			lastState = state
 
 			log.Trace().Int64("ts", state.Unix).Msg("exchange state")
 
@@ -200,6 +205,12 @@ func (c *Client) SetPricesConnection(conn *ws.UserConn) {
 		}
 
 		c.priceConn = conn
+	}
+}
+
+func (c *Client) SetCancelHandler(handler func(state parser.ExchangeState)) {
+	c.actions <- func(state parser.ExchangeState) {
+		c.cancelHandler = handler
 	}
 }
 

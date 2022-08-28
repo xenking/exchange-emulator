@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/xenking/exchange-emulator/internal/server/metrics"
 	"os"
 	"time"
 
@@ -55,6 +56,14 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	}
 
 	srv, err := server.New(application, cfg.GRPC, cfg.Exchange.InfoFile)
+	if err != nil {
+		return err
+	}
+
+	srvMetrics, err := metrics.New(application)
+	if err != nil {
+		return err
+	}
 
 	// Serve must be called before Ready
 	wssOrdersListener, err := upg.Listen("tcp", cfg.WS.OrdersAddr)
@@ -73,6 +82,13 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	}
 
 	grpcListener, err := upg.Listen("tcp", cfg.GRPC.Addr)
+	if err != nil {
+		log.Error().Err(err).Msg("can't listen grpc")
+
+		return err
+	}
+
+	grpcMetricsListener, err := upg.Listen("tcp", cfg.GRPC.MetricsAddr)
 	if err != nil {
 		log.Error().Err(err).Msg("can't listen grpc")
 
@@ -102,6 +118,14 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		log.Info().Msg("serving grpc server")
 		if serveErr := srv.Serve(grpcListener); serveErr != nil {
 			log.Error().Err(serveErr).Msg("grpc server")
+		}
+	}()
+
+	// run grpc metrics server
+	go func() {
+		log.Info().Msg("serving grpc metrics server")
+		if serveErr := srvMetrics.Serve(grpcMetricsListener); serveErr != nil {
+			log.Error().Err(serveErr).Msg("grpc metrics server")
 		}
 	}()
 

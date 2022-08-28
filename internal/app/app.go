@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+
 	"github.com/cornelk/hashmap"
 	"github.com/phuslu/log"
 
@@ -36,7 +37,7 @@ func (a *App) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case conn := <-a.orders:
-			client, err := a.getClient(ctx, conn.ID)
+			client, err := a.GetClient(ctx, conn.ID)
 			if err != nil {
 				conn.SendError(err)
 				conn.Close()
@@ -45,7 +46,7 @@ func (a *App) Start(ctx context.Context) {
 
 			client.SetOrdersConnection(conn)
 		case conn := <-a.prices:
-			client, err := a.getClient(ctx, conn.ID)
+			client, err := a.GetClient(ctx, conn.ID)
 			if err != nil {
 				conn.SendError(err)
 				conn.Close()
@@ -57,7 +58,7 @@ func (a *App) Start(ctx context.Context) {
 	}
 }
 
-func (a *App) getClient(ctx context.Context, userID string) (*exchange.Client, error) {
+func (a *App) GetClient(ctx context.Context, userID string) (*exchange.Client, error) {
 	c, ok := a.clients.Get(userID)
 	client, ok2 := c.(*exchange.Client)
 	if !ok || !ok2 {

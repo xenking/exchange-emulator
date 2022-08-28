@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package server.metrics;
+
+import "api.proto";
+
+option go_package = "github.com/xenking/exchange-emulator/api/proto;api";
+
+service MetricsSubscriber {
+  rpc Subscribe(MetricsRequest) returns (stream MetricsResponse);
+}
+
+message MetricsRequest {
+  string user = 1;
+}
+
+message MetricsResponse {
+  string user = 1;
+  string price = 2;
+  repeated api.Balance balances = 3;
+}

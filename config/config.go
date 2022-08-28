@@ -33,12 +33,13 @@ type ExchangeConfig struct {
 }
 
 type WSConfig struct {
-	OrdersAddr string `default:":8000"`
-	PricesAddr string `default:":8000"`
+	OrdersAddr string `default:":8101"`
+	PricesAddr string `default:":8102"`
 }
 
 type GRPCConfig struct {
-	Addr        string `default:"8000"`
+	Addr        string `default:"8100"`
+	MetricsAddr string `default:"8110"`
 	DisableAuth bool   `default:"false"`
 }
 

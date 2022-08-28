@@ -11,6 +11,7 @@ ws:
 grpc:
   addr: ":8181"
   disable_auth: false
+  metrics_addr: ":8184"
 
 exchange:
   info_file: "./data/exchange.json"
