@@ -12,7 +12,7 @@ import (
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/internal/app"
 	"github.com/xenking/exchange-emulator/internal/server"
-	"github.com/xenking/exchange-emulator/internal/server/metrics"
+	"github.com/xenking/exchange-emulator/internal/server/notification"
 	"github.com/xenking/exchange-emulator/internal/ws"
 	"github.com/xenking/exchange-emulator/pkg/logger"
 )
@@ -60,7 +60,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	srvMetrics, err := metrics.New(application)
+	srvNotifications, err := notification.New(application)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	grpcMetricsListener, err := upg.Listen("tcp", cfg.GRPC.MetricsAddr)
+	grpcNotificationListener, err := upg.Listen("tcp", cfg.GRPC.NotificationsAddr)
 	if err != nil {
 		log.Error().Err(err).Msg("can't listen grpc")
 
@@ -123,9 +123,9 @@ func serve(ctx context.Context, cfg *config.Config) error {
 
 	// run grpc metrics server
 	go func() {
-		log.Info().Msg("serving grpc metrics server")
-		if serveErr := srvMetrics.Serve(grpcMetricsListener); serveErr != nil {
-			log.Error().Err(serveErr).Msg("grpc metrics server")
+		log.Info().Msg("serving grpc notifications server")
+		if serveErr := srvNotifications.Serve(grpcNotificationListener); serveErr != nil {
+			log.Error().Err(serveErr).Msg("grpc notifications server")
 		}
 	}()
 

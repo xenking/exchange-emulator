@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package server.notification;
+
+import "api.proto";
+
+option go_package = "github.com/xenking/exchange-emulator/api/proto;api";
+
+service NotificationSubscriber {
+  rpc Subscribe(NotificationRequest) returns (stream NotificationResponse);
+}
+
+message NotificationRequest {
+  string user = 1;
+}
+
+message NotificationResponse {
+  string user = 1;
+  string price = 2;
+  repeated api.Balance balances = 3;
+  repeated api.Order orders = 4;
+}

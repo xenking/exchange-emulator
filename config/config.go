@@ -38,9 +38,9 @@ type WSConfig struct {
 }
 
 type GRPCConfig struct {
-	Addr        string `default:"8100"`
-	MetricsAddr string `default:"8110"`
-	DisableAuth bool   `default:"false"`
+	Addr              string `default:"8100"`
+	NotificationsAddr string `default:"8110"`
+	DisableAuth       bool   `default:"false"`
 }
 
 type LoggerConfig struct {

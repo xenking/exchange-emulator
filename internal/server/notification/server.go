@@ -1,4 +1,4 @@
-package metrics
+package notification
 
 import (
 	"github.com/phuslu/log"
@@ -8,29 +8,30 @@ import (
 
 	"github.com/xenking/exchange-emulator/gen/proto/api"
 	"github.com/xenking/exchange-emulator/internal/app"
+	"github.com/xenking/exchange-emulator/internal/order"
 	"github.com/xenking/exchange-emulator/internal/parser"
 )
 
 func New(a *app.App) (*grpc.Server, error) {
 	s := grpc.NewServer()
 
-	api.RegisterMetricsSubscriberServer(s, NewServer(a))
+	api.RegisterNotificationSubscriberServer(s, NewServer(a))
 
 	return s, nil
 }
 
-func NewServer(a *app.App) api.MetricsSubscriberServer {
+func NewServer(a *app.App) api.NotificationSubscriberServer {
 	return &Server{
 		app: a,
 	}
 }
 
 type Server struct {
-	api.UnimplementedMetricsSubscriberServer
+	api.UnimplementedNotificationSubscriberServer
 	app *app.App
 }
 
-func (s *Server) Subscribe(req *api.MetricsRequest, stream api.MetricsSubscriber_SubscribeServer) error {
+func (s *Server) Subscribe(req *api.NotificationRequest, stream api.NotificationSubscriber_SubscribeServer) error {
 	client, err := s.app.GetClient(req.User)
 	if err != nil {
 		return status.Error(codes.NotFound, err.Error())
@@ -48,11 +49,17 @@ func (s *Server) Subscribe(req *api.MetricsRequest, stream api.MetricsSubscriber
 				Locked: asset.Locked.String(),
 			}
 		}
-		resp := &api.MetricsResponse{
+
+		resp := &api.NotificationResponse{
 			User:     req.User,
 			Price:    state.Close.String(),
 			Balances: balances,
 		}
+		client.Order.Range(func(orders []*order.Order) {
+			for _, o := range orders {
+				resp.Orders = append(resp.Orders, o.Order)
+			}
+		})
 		err = stream.Send(resp)
 		close(done)
 	})
