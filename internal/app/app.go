@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cornelk/hashmap"
+	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
 
 	"github.com/xenking/exchange-emulator/config"
@@ -37,7 +38,7 @@ func (a *App) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case conn := <-a.orders:
-			client, err := a.GetClient(ctx, conn.ID)
+			client, err := a.GetOrCreateClient(ctx, conn.ID)
 			if err != nil {
 				conn.SendError(err)
 				conn.Close()
@@ -46,7 +47,7 @@ func (a *App) Start(ctx context.Context) {
 
 			client.SetOrdersConnection(conn)
 		case conn := <-a.prices:
-			client, err := a.GetClient(ctx, conn.ID)
+			client, err := a.GetOrCreateClient(ctx, conn.ID)
 			if err != nil {
 				conn.SendError(err)
 				conn.Close()
@@ -58,7 +59,15 @@ func (a *App) Start(ctx context.Context) {
 	}
 }
 
-func (a *App) GetClient(ctx context.Context, userID string) (*exchange.Client, error) {
+func (a *App) GetClient(userID string) (*exchange.Client, error) {
+	c, ok := a.clients.Get(userID)
+	if !ok {
+		return nil, errors.New("client not found")
+	}
+	return c.(*exchange.Client), nil
+}
+
+func (a *App) GetOrCreateClient(ctx context.Context, userID string) (*exchange.Client, error) {
 	c, ok := a.clients.Get(userID)
 	client, ok2 := c.(*exchange.Client)
 	if !ok || !ok2 {

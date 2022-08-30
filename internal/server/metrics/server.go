@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"github.com/phuslu/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -30,10 +31,11 @@ type Server struct {
 }
 
 func (s *Server) Subscribe(req *api.MetricsRequest, stream api.MetricsSubscriber_SubscribeServer) error {
-	client, err := s.app.GetClient(stream.Context(), req.User)
+	client, err := s.app.GetClient(req.User)
 	if err != nil {
-		return status.Errorf(codes.NotFound, "client not found: %v", err)
+		return status.Error(codes.NotFound, err.Error())
 	}
+	log.Info().Str("user", req.User).Msg("metrics subscribe")
 
 	done := make(chan struct{})
 	client.SetCancelHandler(func(state parser.ExchangeState) {
