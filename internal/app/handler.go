@@ -67,10 +67,6 @@ func (a *App) CreateOrders(ctx context.Context, userID string, apiOrders []*api.
 			}
 
 			err = user.UpdateBalance(o)
-			if err != nil {
-				break
-			}
-
 			resp[i] = &api.Order{
 				Id:           o.Id,
 				Symbol:       o.Symbol,
@@ -122,13 +118,12 @@ func (a *App) GetOrder(ctx context.Context, userID, orderID string) (*api.Order,
 	return resp, err
 }
 
-func (a *App) CancelOrder(ctx context.Context, userID, orderID string) (*api.Order, error) {
+func (a *App) CancelOrder(ctx context.Context, userID, orderID string) error {
 	user, err := a.GetOrCreateClient(ctx, userID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	var resp *api.Order
 	user.NewAction(ctx, func(state parser.ExchangeState) {
 		o := user.Order.Cancel(orderID)
 		if o == nil {
@@ -137,34 +132,19 @@ func (a *App) CancelOrder(ctx context.Context, userID, orderID string) (*api.Ord
 		}
 
 		err = user.UpdateBalance(o)
-
-		resp = &api.Order{
-			Id:           o.Id,
-			Symbol:       o.Symbol,
-			Side:         o.Side,
-			Type:         o.Type,
-			Price:        o.Order.Price,
-			Quantity:     o.Order.Quantity,
-			Total:        o.Order.Total,
-			Status:       o.Status,
-			OrderId:      o.OrderId,
-			UserId:       o.UserId,
-			TransactTime: o.TransactTime,
-		}
 	})
 
-	return resp, err
+	return err
 }
 
-func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string) ([]*api.Order, error) {
+func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string) error {
 	user, err := a.GetOrCreateClient(ctx, userID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	resp := make([]*api.Order, len(orderIDs))
 	user.NewAction(ctx, func(state parser.ExchangeState) {
-		for i, orderID := range orderIDs {
+		for _, orderID := range orderIDs {
 			o := user.Order.Cancel(orderID)
 			if o == nil {
 				err = order.ErrNotFound
@@ -172,27 +152,10 @@ func (a *App) CancelOrders(ctx context.Context, userID string, orderIDs []string
 			}
 
 			err = user.UpdateBalance(o)
-			if err != nil {
-				break
-			}
-
-			resp[i] = &api.Order{
-				Id:           o.Id,
-				Symbol:       o.Symbol,
-				Side:         o.Side,
-				Type:         o.Type,
-				Price:        o.Order.Price,
-				Quantity:     o.Order.Quantity,
-				Total:        o.Order.Total,
-				Status:       o.Status,
-				OrderId:      o.OrderId,
-				UserId:       o.UserId,
-				TransactTime: o.TransactTime,
-			}
 		}
 	})
 
-	return resp, err
+	return err
 }
 
 func (a *App) GetBalances(ctx context.Context, userID string) (*api.Balances, error) {

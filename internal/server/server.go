@@ -88,13 +88,11 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 			order, appErr = s.app.GetOrder(ctx, userID, req.GetOrder.GetId())
 			resp.Response = &api.Response_GetOrder{GetOrder: order}
 		case *api.Request_CancelOrder:
-			var order *api.Order
-			order, appErr = s.app.CancelOrder(ctx, userID, req.CancelOrder.GetId())
-			resp.Response = &api.Response_CancelOrder{CancelOrder: order}
+			appErr = s.app.CancelOrder(ctx, userID, req.CancelOrder.GetId())
+			resp.Response = &api.Response_CancelOrder{CancelOrder: &emptypb.Empty{}}
 		case *api.Request_CancelOrders:
-			var orders []*api.Order
-			orders, appErr = s.app.CancelOrders(ctx, userID, req.CancelOrders.GetIds())
-			resp.Response = &api.Response_CancelOrders{CancelOrders: &api.Orders{Orders: orders}}
+			appErr = s.app.CancelOrders(ctx, userID, req.CancelOrders.GetIds())
+			resp.Response = &api.Response_CancelOrders{CancelOrders: &emptypb.Empty{}}
 		case *api.Request_GetBalances:
 			var balances *api.Balances
 			balances, appErr = s.app.GetBalances(ctx, userID)
