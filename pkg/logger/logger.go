@@ -24,11 +24,15 @@ func New(cfg *config.LoggerConfig) *log.Logger {
 		EndWithMessage: true,
 		Writer:         os.Stdout,
 	}
+	fw := &log.FileWriter{
+		Filename:   "out.log",
+		TimeFormat: log.TimeFormatUnixMs,
+	}
 
 	return &log.Logger{
 		Level:  level,
 		Caller: cfg.WithCaller,
-		Writer: w,
+		Writer: &log.MultiEntryWriter{w, fw},
 	}
 }
 

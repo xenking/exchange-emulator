@@ -32,8 +32,8 @@ message Response {
     Order create_order = 1;
     Orders create_orders = 2;
     Order get_order = 3;
-    google.protobuf.Empty cancel_order = 4;
-    google.protobuf.Empty cancel_orders = 5;
+    Order cancel_order = 4;
+    Orders cancel_orders = 5;
     Balances get_balances = 6;
     google.protobuf.Empty set_balances = 7;
     Price get_price = 8;

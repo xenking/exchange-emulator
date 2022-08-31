@@ -21,7 +21,7 @@ type Server struct {
 func New(ctx context.Context) *Server {
 	s := &Server{
 		conns: &hashmap.HashMap{},
-		users: make(chan *UserConn),
+		users: make(chan *UserConn, 1024),
 	}
 	s.Server.HandleOpen(s.OpenConn)
 	s.Server.HandleClose(s.CloseConn)

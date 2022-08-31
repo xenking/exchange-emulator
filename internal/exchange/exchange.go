@@ -50,7 +50,7 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 		Parser:     p,
 		Balance:    b,
 		Order:      o,
-		actions:    make(chan Action, 200),
+		actions:    make(chan Action, 1024),
 		cancel:     cancel,
 		commission: decimal.NewFromFloat(config.Exchange.Commission),
 	}
@@ -93,7 +93,7 @@ func (c *Client) Start(ctx context.Context) {
 				currentStates = states
 			}
 		case act := <-c.actions:
-			state.Unix += 10 // add 10 ms time offset to prevent duplicate orders
+			state.Unix += 1 // add 1 ms time offset to prevent duplicate orders
 			log.Trace().Int64("ts", state.Unix).Msg("exchange action")
 			act(state)
 
@@ -107,7 +107,7 @@ func (c *Client) Start(ctx context.Context) {
 						log.Warn().Msg("actions closed")
 						break
 					}
-					state.Unix += 10 // add 10 ms time offset to prevent duplicate orders
+					state.Unix += 1 // add 10 ms time offset to prevent duplicate orders
 					log.Trace().Int64("ts", state.Unix).Msg("exchange action")
 					act(state)
 				default:
@@ -158,9 +158,9 @@ func (c *Client) Start(ctx context.Context) {
 
 					o.Status = api.OrderStatus_FILLED
 
-					log.Debug().Str("order", o.Id).Str("user", o.UserId).Str("symbol", o.Symbol).
-						Str("side", o.Side.String()).Str("price", o.Order.Price).Str("qty", o.Order.Quantity).
-						Msg("order filled on exchange")
+					log.Debug().Str("order", o.Id).Uint64("internal", o.OrderId).Str("user", o.UserId).Str("symbol", o.Symbol).
+						Str("side", o.Side.String()).Str("price", o.Order.Price).Str("qty", o.Order.Quantity).Int64("ts", state.Unix).
+						Msg("order filled")
 
 					if err := c.UpdateBalance(o); err != nil {
 						log.Error().Err(err).Str("user", o.UserId).Str("order", o.Id).Msg("can't update balance")
