@@ -10,6 +10,7 @@ import (
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/internal/exchange"
 	"github.com/xenking/exchange-emulator/internal/ws"
+	"github.com/xenking/exchange-emulator/pkg/logger"
 )
 
 type App struct {
@@ -59,15 +60,15 @@ func (a *App) Start(ctx context.Context) {
 	}
 }
 
-func (a *App) GetClient(userID string) (*exchange.Client, error) {
+func (a *App) GetClient(userID string) (*Client, error) {
 	c, ok := a.clients.Get(userID)
 	if !ok {
 		return nil, errors.New("client not found")
 	}
-	return c.(*exchange.Client), nil
+	return &Client{Client: c.(*exchange.Client)}, nil
 }
 
-func (a *App) GetOrCreateClient(ctx context.Context, userID string) (*exchange.Client, error) {
+func (a *App) GetOrCreateClient(ctx context.Context, userID string) (*Client, error) {
 	c, ok := a.clients.Get(userID)
 	client, ok2 := c.(*exchange.Client)
 	if !ok || !ok2 {
@@ -79,9 +80,11 @@ func (a *App) GetOrCreateClient(ctx context.Context, userID string) (*exchange.C
 			return nil, err
 		}
 
+		client.SetLogger(logger.NewUser(userID))
+
 		log.Debug().Str("user", userID).Msg("new exchange client")
 		a.clients.Set(userID, client)
 	}
 
-	return client, nil
+	return &Client{Client: client}, nil
 }

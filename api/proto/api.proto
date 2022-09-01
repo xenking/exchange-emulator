@@ -20,10 +20,11 @@ message Request {
     OrderRequest get_order = 3;
     OrderRequest cancel_order = 4;
     OrderRequests cancel_orders = 5;
-    google.protobuf.Empty get_balances = 6;
-    Balances set_balances = 7;
-    PriceRequest get_price = 8;
-    google.protobuf.Empty get_exchange_info = 9;
+    ReplaceOrderRequest replace_order = 6;
+    google.protobuf.Empty get_balances = 7;
+    Balances set_balances = 8;
+    PriceRequest get_price = 9;
+    google.protobuf.Empty get_exchange_info = 10;
   }
 }
 
@@ -34,11 +35,12 @@ message Response {
     Order get_order = 3;
     google.protobuf.Empty cancel_order = 4;
     google.protobuf.Empty cancel_orders = 5;
-    Balances get_balances = 6;
-    google.protobuf.Empty set_balances = 7;
-    Price get_price = 8;
-    google.protobuf.Struct get_exchange_info = 9;
-    Error error = 10;
+    Order replace_order = 6;
+    Balances get_balances = 7;
+    google.protobuf.Empty set_balances = 8;
+    Price get_price = 9;
+    google.protobuf.Struct get_exchange_info = 10;
+    Error error = 11;
   }
 }
 
@@ -70,6 +72,11 @@ message OrderRequests {
 
 message OrderRequest {
   string id = 1;
+}
+
+message ReplaceOrderRequest {
+  string cancel_id = 1;
+  Order order = 2;
 }
 
 enum OrderType {

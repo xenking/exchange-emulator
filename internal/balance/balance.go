@@ -17,6 +17,7 @@ type Asset struct {
 type Tracker struct {
 	transactions chan transaction
 	data         map[string]*Asset
+	log          *log.Logger
 }
 
 func New() *Tracker {
@@ -76,7 +77,7 @@ func (t *Tracker) NewTransaction(asset string, f func(data *Asset) error) error 
 			close(errc)
 		},
 	}
-	log.Trace().Str("asset", asset).Msg("balance transaction")
+	t.log.Trace().Str("asset", asset).Msg("balance transaction")
 	return <-errc
 }
 
@@ -88,7 +89,7 @@ func (t *Tracker) List() []Asset {
 		action: func(_ *Asset) {
 			for _, asset := range t.data {
 				resp = append(resp, *asset)
-				log.Trace().Str("asset", asset.Name).Str("free", asset.Free.String()).
+				t.log.Trace().Str("asset", asset.Name).Str("free", asset.Free.String()).
 					Str("locked", asset.Locked.String()).Msg("balance get")
 			}
 			close(done)
@@ -104,10 +105,14 @@ func (t *Tracker) Set(balances []Asset) {
 		action: func(_ *Asset) {
 			for _, balance := range balances {
 				t.data[balance.Name] = &balance
-				log.Trace().Str("asset", balance.Name).Str("free", balance.Free.String()).
+				t.log.Trace().Str("asset", balance.Name).Str("free", balance.Free.String()).
 					Str("locked", balance.Locked.String()).Msg("balance set")
 
 			}
 		},
 	}
+}
+
+func (t *Tracker) SetLogger(log *log.Logger) {
+	t.log = log
 }

@@ -44,8 +44,9 @@ type GRPCConfig struct {
 }
 
 type LoggerConfig struct {
-	Level      string `default:"debug"`
-	WithCaller int    `default:"1"`
+	Level          string `default:"debug"`
+	DisableConsole bool   `default:"false"`
+	WithCaller     int    `default:"1"`
 }
 
 type ParserConfig struct {

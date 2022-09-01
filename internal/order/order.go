@@ -24,6 +24,7 @@ type Tracker struct {
 	transactions chan transaction
 	signal       chan struct{}
 	active       []*Order
+	log          *log.Logger
 }
 
 func New() *Tracker {
@@ -82,7 +83,7 @@ func (t *Tracker) Start(ctx context.Context) {
 				data[order.Id] = order
 				t.active = append(t.active, order)
 
-				log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+				t.log.Trace().Str("id", order.Id).Str("symbol", order.Symbol).
 					Int64("ts", order.TransactTime).Msg("order added")
 
 				if len(t.active) == 1 {
@@ -101,7 +102,7 @@ func (t *Tracker) Start(ctx context.Context) {
 				tt.action(order)
 
 				if order != nil {
-					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+					t.log.Trace().Str("id", order.Id).Str("symbol", order.Symbol).
 						Int64("ts", order.TransactTime).Msg("order deleted")
 				}
 
@@ -112,7 +113,7 @@ func (t *Tracker) Start(ctx context.Context) {
 				order, ok := data[tt.id]
 				tt.action(order)
 				if ok {
-					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+					t.log.Trace().Str("id", order.Id).Str("symbol", order.Symbol).
 						Int64("ts", order.TransactTime).Msg("order updated")
 				}
 			case typeGet:
@@ -120,7 +121,7 @@ func (t *Tracker) Start(ctx context.Context) {
 				tt.action(order)
 
 				if ok {
-					log.Debug().Str("id", order.Id).Str("symbol", order.Symbol).
+					t.log.Trace().Str("id", order.Id).Str("symbol", order.Symbol).
 						Int64("ts", order.TransactTime).Msg("order get")
 				}
 			}
@@ -266,4 +267,8 @@ func (t *Tracker) RemoveRange(orders []string) {
 
 func (t *Tracker) Control() <-chan struct{} {
 	return t.signal
+}
+
+func (t *Tracker) SetLogger(log *log.Logger) {
+	t.log = log
 }

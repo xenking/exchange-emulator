@@ -18,6 +18,7 @@ type Client struct {
 	Parser  *parser.Listener
 	Balance *balance.Tracker
 	Order   *order.Tracker
+	Log     *log.Logger
 
 	orderConn *ws.UserConn
 	priceConn *ws.UserConn
@@ -66,7 +67,7 @@ func (c *Client) Start(ctx context.Context) {
 	states := c.Parser.ExchangeStates()
 	state, opened := <-states
 	if !opened {
-		log.Warn().Msg("exchange closed")
+		c.Log.Warn().Msg("exchange closed")
 		return
 	}
 
@@ -79,22 +80,22 @@ func (c *Client) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-c.orderConn.CloseHandler():
-			log.Warn().Msg("orders connection closed")
+			c.Log.Warn().Msg("orders connection closed")
 			return
 		case <-c.priceConn.CloseHandler():
-			log.Warn().Msg("prices connection closed")
+			c.Log.Warn().Msg("prices connection closed")
 			return
 		case <-c.Order.Control():
 			if currentStates != nil {
-				log.Debug().Msg("stop exchange")
+				c.Log.Debug().Msg("stop exchange")
 				currentStates = nil
 			} else {
-				log.Debug().Msg("start exchange")
+				c.Log.Debug().Msg("start exchange")
 				currentStates = states
 			}
 		case act := <-c.actions:
 			state.Unix += 1 // add 1 ms time offset to prevent duplicate orders
-			log.Trace().Int64("ts", state.Unix).Msg("exchange action")
+			c.Log.Trace().Int64("ts", state.Unix).Msg("exchange action")
 			act(state)
 
 			nextAction := true
@@ -104,11 +105,11 @@ func (c *Client) Start(ctx context.Context) {
 					return
 				case act, nextAction = <-c.actions:
 					if !nextAction {
-						log.Warn().Msg("actions closed")
+						c.Log.Warn().Msg("actions closed")
 						break
 					}
 					state.Unix += 1 // add 10 ms time offset to prevent duplicate orders
-					log.Trace().Int64("ts", state.Unix).Msg("exchange action")
+					c.Log.Trace().Int64("ts", state.Unix).Msg("exchange action")
 					act(state)
 				default:
 					nextAction = false
@@ -116,7 +117,7 @@ func (c *Client) Start(ctx context.Context) {
 			}
 		case state, opened = <-currentStates:
 			if !opened {
-				log.Warn().Msg("exchange closed")
+				c.Log.Warn().Msg("exchange closed")
 				currentStates = nil
 				if c.cancelHandler != nil {
 					c.cancelHandler(lastState)
@@ -125,10 +126,10 @@ func (c *Client) Start(ctx context.Context) {
 			}
 			lastState = state
 
-			log.Trace().Int64("ts", state.Unix).Msg("exchange state")
+			c.Log.Trace().Int64("ts", state.Unix).Msg("exchange state")
 
 			if err := c.priceConn.Send(state); err != nil {
-				log.Error().Err(err).Str("user", c.priceConn.ID).Msg("can't send price state")
+				c.Log.Error().Err(err).Str("user", c.priceConn.ID).Msg("can't send price state")
 				continue
 			}
 
@@ -151,26 +152,26 @@ func (c *Client) Start(ctx context.Context) {
 						continue
 					}
 					if o.Total.GreaterThan(state.AssetVolume) {
-						log.Panic().Str("side", o.Side.String()).Str("total", o.Total.String()).
+						c.Log.Panic().Str("side", o.Side.String()).Str("total", o.Total.String()).
 							Str("asset", state.AssetVolume.String()).
 							Int64("ts", state.Unix).Msg("can't close order in one kline. Need to use PARTIAL_FILLED")
 					}
 
 					o.Status = api.OrderStatus_FILLED
 
-					log.Debug().Str("order", o.Id).Uint64("internal", o.OrderId).Str("user", o.UserId).Str("symbol", o.Symbol).
+					c.Log.Debug().Str("order", o.Id).Uint64("internal", o.OrderId).Str("user", o.UserId).Str("symbol", o.Symbol).
 						Str("side", o.Side.String()).Str("price", o.Order.Price).Str("qty", o.Order.Quantity).Int64("ts", state.Unix).
 						Msg("order filled")
 
 					if err := c.UpdateBalance(o); err != nil {
-						log.Error().Err(err).Str("user", o.UserId).Str("order", o.Id).Msg("can't update balance")
+						c.Log.Error().Err(err).Str("user", o.UserId).Str("order", o.Id).Msg("can't update balance")
 						continue
 					}
 
 					deletedOrders = append(deletedOrders, o.Id)
 
 					if err := c.orderConn.Send(o.Order); err != nil {
-						log.Error().Err(err).Str("user", c.orderConn.ID).Str("order", o.Id).Msg("can't send order update")
+						c.Log.Error().Err(err).Str("user", c.orderConn.ID).Str("order", o.Id).Msg("can't send order update")
 						continue
 					}
 				}
@@ -212,6 +213,12 @@ func (c *Client) SetCancelHandler(handler func(state parser.ExchangeState)) {
 	c.actions <- func(state parser.ExchangeState) {
 		c.cancelHandler = handler
 	}
+}
+
+func (c *Client) SetLogger(log *log.Logger) {
+	c.Log = log
+	c.Order.SetLogger(log)
+	c.Balance.SetLogger(log)
 }
 
 func (c *Client) Close() {
@@ -265,7 +272,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	}
 
 	err := c.Balance.NewTransaction(base, func(asset *balance.Asset) (err error) {
-		log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+		c.Log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
 			Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
 			Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update started 1")
 		switch o.GetStatus() {
@@ -295,12 +302,12 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 				asset.Free = asset.Free.Add(o.Quantity)
 			}
 		}
-		log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+		c.Log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
 			Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
 			Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update finished 1")
 
 		if asset.Free.IsNegative() || asset.Locked.IsNegative() {
-			log.Error().Str("asset", asset.Name).
+			c.Log.Error().Str("asset", asset.Name).
 				Str("free", asset.Free.String()).
 				Str("locked", asset.Locked.String()).
 				Str("total", o.Total.String()).Msg("balance update failed")
@@ -314,7 +321,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	}
 	if o.Status == api.OrderStatus_FILLED {
 		err = c.Balance.NewTransaction(quote, func(asset *balance.Asset) (err error) {
-			log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+			c.Log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
 				Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
 				Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update started 2")
 			switch o.GetSide() {
@@ -325,7 +332,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 			}
 
 			if asset.Free.IsNegative() || asset.Locked.IsNegative() {
-				log.Error().Str("asset", asset.Name).
+				c.Log.Error().Str("asset", asset.Name).
 					Str("free", asset.Free.String()).
 					Str("locked", asset.Locked.String()).
 					Str("total", o.Total.String()).Msg("balance update failed")
@@ -333,7 +340,7 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 				return balance.ErrNegative
 			}
 
-			log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
+			c.Log.Trace().Str("side", o.Side.String()).Str("asset", asset.Name).
 				Str("free", asset.Free.String()).Str("locked", asset.Locked.String()).
 				Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update finished 2")
 			return

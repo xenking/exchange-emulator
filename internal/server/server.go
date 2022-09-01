@@ -56,15 +56,20 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 		return uErr
 	}
 
-	for {
-		ctx := stream.Context()
-		if err := contextError(ctx); err != nil {
-			return err
-		}
+	ctx := stream.Context()
+	if err := contextError(ctx); err != nil {
+		return err
+	}
 
+	client, err := s.app.GetOrCreateClient(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	for {
 		r, err := stream.Recv()
 		if err == io.EOF {
-			log.Info().Msg("connection closed")
+			log.Info().Str("user", userID).Msg("connection closed")
 			return nil
 		}
 		if err != nil {
@@ -73,36 +78,39 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 
 		resp := &api.Response{}
 		var appErr error
-
 		switch req := r.GetRequest().(type) {
 		case *api.Request_CreateOrder:
 			var order *api.Order
-			order, appErr = s.app.CreateOrder(ctx, userID, req.CreateOrder)
+			order, appErr = client.CreateOrder(ctx, userID, req.CreateOrder)
 			resp.Response = &api.Response_CreateOrder{CreateOrder: order}
 		case *api.Request_CreateOrders:
 			var orders []*api.Order
-			orders, appErr = s.app.CreateOrders(ctx, userID, req.CreateOrders.GetOrders())
+			orders, appErr = client.CreateOrders(ctx, userID, req.CreateOrders.GetOrders())
 			resp.Response = &api.Response_CreateOrders{CreateOrders: &api.Orders{Orders: orders}}
 		case *api.Request_GetOrder:
 			var order *api.Order
-			order, appErr = s.app.GetOrder(ctx, userID, req.GetOrder.GetId())
+			order, appErr = client.GetOrder(ctx, req.GetOrder.GetId())
 			resp.Response = &api.Response_GetOrder{GetOrder: order}
 		case *api.Request_CancelOrder:
-			appErr = s.app.CancelOrder(ctx, userID, req.CancelOrder.GetId())
+			appErr = client.CancelOrder(ctx, req.CancelOrder.GetId())
 			resp.Response = &api.Response_CancelOrder{CancelOrder: &emptypb.Empty{}}
 		case *api.Request_CancelOrders:
-			appErr = s.app.CancelOrders(ctx, userID, req.CancelOrders.GetIds())
+			appErr = client.CancelOrders(ctx, req.CancelOrders.GetIds())
 			resp.Response = &api.Response_CancelOrders{CancelOrders: &emptypb.Empty{}}
+		case *api.Request_ReplaceOrder:
+			var order *api.Order
+			order, appErr = client.ReplaceOrder(ctx, userID, req.ReplaceOrder.CancelId, req.ReplaceOrder.Order)
+			resp.Response = &api.Response_ReplaceOrder{ReplaceOrder: order}
 		case *api.Request_GetBalances:
 			var balances *api.Balances
-			balances, appErr = s.app.GetBalances(ctx, userID)
+			balances = client.GetBalances(ctx)
 			resp.Response = &api.Response_GetBalances{GetBalances: balances}
 		case *api.Request_SetBalances:
-			appErr = s.app.SetBalances(ctx, userID, req.SetBalances)
+			client.SetBalances(ctx, req.SetBalances)
 			resp.Response = &api.Response_SetBalances{SetBalances: &emptypb.Empty{}}
 		case *api.Request_GetPrice:
 			var price *api.Price
-			price, appErr = s.app.GetPrice(ctx, userID, req.GetPrice.GetSymbol())
+			price = client.GetPrice(ctx, req.GetPrice.GetSymbol())
 			resp.Response = &api.Response_GetPrice{GetPrice: price}
 		case *api.Request_GetExchangeInfo:
 			resp.Response = &api.Response_GetExchangeInfo{GetExchangeInfo: s.exchangeInfo}
