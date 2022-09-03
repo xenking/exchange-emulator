@@ -83,7 +83,7 @@ func (t *Tracker) Start(ctx context.Context) {
 				data[order.Id] = order
 				t.active = append(t.active, order)
 
-				t.log.Trace().Str("id", order.Id).Str("symbol", order.Symbol).
+				t.log.Trace().Str("id", order.Id).Uint64("internal", order.OrderId).Str("symbol", order.Symbol).
 					Int64("ts", order.TransactTime).Msg("order added")
 
 				if len(t.active) == 1 {

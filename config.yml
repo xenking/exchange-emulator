@@ -21,5 +21,5 @@ parser:
 #  file: "./data/Binance_ETHUSDT_minute.csv"
   file: "./data/Binance_ETHUSDT_1m_2022.csv"
   delay: 3ms
-  offset: 1597351740000
+#  offset: 1597351740000
 #  offset: 1574851020000

@@ -23,6 +23,9 @@ func main() {
 	dateStart, _ := time.Parse("2006-01-02", os.Args[1])
 	dateEnd, _ := time.Parse("2006-01-02", os.Args[2])
 
+	dateStart = time.Date(dateStart.Year(), dateStart.Month(), dateStart.Day(), 0, 0, 0, 0, time.UTC)
+	dateEnd = time.Date(dateEnd.Year(), dateEnd.Month(), dateEnd.Day(), 0, 0, 0, 0, time.UTC)
+
 	// Create the file
 	r, w := io.Pipe()
 

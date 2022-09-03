@@ -67,6 +67,9 @@ func (c *Client) ReplaceOrder(ctx context.Context, userID string, cancelID strin
 			if err != nil {
 				return
 			}
+		} else {
+			err = order.ErrNotFound
+			return
 		}
 
 		o := c.Order.Add(apiOrder, state.Unix)
