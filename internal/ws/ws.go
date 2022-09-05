@@ -6,21 +6,21 @@ import (
 
 	"github.com/cornelk/hashmap"
 	"github.com/go-faster/errors"
+	"github.com/goccy/go-json"
 	"github.com/phuslu/log"
-	"github.com/segmentio/encoding/json"
 	"github.com/valyala/fasthttp"
 	"github.com/xenking/websocket"
 )
 
 type Server struct {
 	websocket.Server
-	conns *hashmap.HashMap // map[userId]*UserConn
+	conns *hashmap.Map[string, *UserConn] // map[userId]*UserConn
 	users chan *UserConn
 }
 
 func New(ctx context.Context) *Server {
 	s := &Server{
-		conns: &hashmap.HashMap{},
+		conns: hashmap.New[string, *UserConn](),
 		users: make(chan *UserConn, 1024),
 	}
 	s.Server.HandleOpen(s.OpenConn)
@@ -51,22 +51,22 @@ func (s *Server) CloseConn(conn *websocket.Conn, err error) {
 	if err != nil {
 		_, _ = conn.Write(NewError(err).Bytes())
 	}
-	id := conn.UserValue("id")
-	if id == nil {
+	i := conn.UserValue("id")
+	id, ok := i.(string)
+	if i == nil || !ok {
 		return
 	}
 
-	uc, ok := s.conns.Get(id)
+	userConn, ok := s.conns.Get(id)
 	if !ok {
-		log.Error().Str("id", id.(string)).Msg("Get user conn failed")
+		log.Error().Str("id", id).Msg("Get user conn failed")
 		return
 	}
 	s.conns.Del(id)
 
-	userConn := uc.(*UserConn)
 	close(userConn.close)
 
-	log.Info().Uint64("id", conn.ID()).Str("user", id.(string)).Msg("Close conn")
+	log.Info().Uint64("id", conn.ID()).Str("user", id).Msg("Close conn")
 }
 
 type initConn struct {
@@ -102,9 +102,13 @@ func (s *Server) OnData(conn *websocket.Conn, _ bool, data []byte) {
 
 	conn.SetUserValue("init", true)
 	conn.SetUserValue("user", init.UserID)
+
+	enc := json.NewEncoder(conn)
+	enc.SetEscapeHTML(false)
 	uc := &UserConn{
 		conn:  conn,
 		ID:    init.UserID,
+		enc:   enc,
 		close: make(chan struct{}),
 	}
 	s.conns.Set(init.UserID, uc)
@@ -113,7 +117,7 @@ func (s *Server) OnData(conn *websocket.Conn, _ bool, data []byte) {
 	init.Initialized = true
 	log.Info().Uint64("id", conn.ID()).Str("user", init.UserID).Msg("Init conn")
 
-	err = json.NewEncoder(conn).Encode(init)
+	err = enc.Encode(init)
 	if err != nil {
 		_, _ = conn.Write(NewError(err).Bytes())
 

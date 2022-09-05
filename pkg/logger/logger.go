@@ -49,13 +49,12 @@ func NewModule(name string) *log.Logger {
 	ctx := log.NewContext(nil).Str("module", name).Value()
 
 	return &log.Logger{
-		Level:          Log.Level,
-		Caller:         Log.Caller,
-		FullpathCaller: Log.FullpathCaller,
-		TimeField:      Log.TimeField,
-		TimeFormat:     Log.TimeFormat,
-		Context:        ctx,
-		Writer:         Log.Writer,
+		Level:      Log.Level,
+		Caller:     Log.Caller,
+		TimeField:  Log.TimeField,
+		TimeFormat: Log.TimeFormat,
+		Context:    ctx,
+		Writer:     Log.Writer,
 	}
 }
 
@@ -63,12 +62,11 @@ func NewUser(name string) *log.Logger {
 	ctx := log.NewContext(nil).Str("user", name).Value()
 
 	return &log.Logger{
-		Level:          Log.Level,
-		Caller:         Log.Caller,
-		FullpathCaller: Log.FullpathCaller,
-		TimeField:      Log.TimeField,
-		TimeFormat:     Log.TimeFormat,
-		Context:        ctx,
-		Writer:         Log.Writer,
+		Level:      Log.Level,
+		Caller:     Log.Caller,
+		TimeField:  Log.TimeField,
+		TimeFormat: Log.TimeFormat,
+		Context:    ctx,
+		Writer:     Log.Writer,
 	}
 }

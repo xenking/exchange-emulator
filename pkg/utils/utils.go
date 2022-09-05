@@ -25,6 +25,47 @@ func WriteUint(n int64) string {
 	return s.String()
 }
 
+func AppendUint(dst []byte, n int64) []byte {
+	var b [20]byte
+	buf := b[:]
+	i := len(buf)
+	var q int64
+	for n >= 10 {
+		i--
+		q = n / 10
+		buf[i] = '0' + byte(n-q*10)
+		n = q
+	}
+	i--
+	buf[i] = '0' + byte(n)
+	return append(dst, buf[i:]...)
+}
+
+func AppendDecimal(dst []byte, n int64, exp int) []byte {
+	var b [21]byte
+	buf := b[:]
+	i := len(buf)
+	var q int64
+	for n >= 10 {
+		if exp < 0 && i == cap(b)+exp {
+			i--
+			buf[i] = '.'
+		}
+		i--
+		q = n / 10
+		buf[i] = '0' + byte(n-q*10)
+		n = q
+	}
+	i--
+	buf[i] = '0' + byte(n)
+
+	dst = append(dst, buf[i:]...)
+	if exp > 0 {
+		dst = append(dst, '0')
+	}
+	return dst
+}
+
 // ParseUint parses uint from buf.
 func ParseUint(buf string) (int64, error) {
 	v, n, err := parseUintBuf(buf)
@@ -43,6 +84,43 @@ var (
 )
 
 func parseUintBuf(b string) (value int64, n int, err error) {
+	n = len(b)
+	if n == 0 {
+		return -1, 0, errEmptyInt
+	}
+	value = 0
+	for i := 0; i < n; i++ {
+		c := b[i]
+		k := c - '0'
+		if k > 9 {
+			if i == 0 {
+				return -1, i, errUnexpectedFirstChar
+			}
+
+			return value, i, nil
+		}
+		vNew := 10*value + int64(k)
+		// Test for overflow.
+		if vNew < value {
+			return -1, i, errTooLongInt
+		}
+		value = vNew
+	}
+
+	return value, n, nil
+}
+
+// ParseUintBytes parses uint from buf.
+func ParseUintBytes(buf []byte) (int64, error) {
+	v, n, err := parseUintBufBytes(buf)
+	if n != len(buf) {
+		return -1, errUnexpectedTrailingChar
+	}
+
+	return v, err
+}
+
+func parseUintBufBytes(b []byte) (value int64, n int, err error) {
 	n = len(b)
 	if n == 0 {
 		return -1, 0, errEmptyInt

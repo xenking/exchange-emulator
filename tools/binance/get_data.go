@@ -35,6 +35,8 @@ func main() {
 			panic(err)
 		}
 		defer out.Close()
+		// write header
+		out.WriteString("unix,date,symbol,open,high,low,close,Volume ETH,Volume USDT,tradecount\n")
 
 		err = removeUnusedData(os.Args[3][:3]+"/"+os.Args[3][3:], r, out)
 	}()
@@ -82,6 +84,8 @@ func downloadFile(url string, file io.Writer) (err error) {
 	return nil
 }
 
+const defaultLayout = "2006-01-02T15:04:05Z"
+
 func removeUnusedData(pair string, in io.Reader, out *os.File) error {
 	var sb strings.Builder
 	sc := bufio.NewScanner(in)
@@ -96,7 +100,7 @@ func removeUnusedData(pair string, in io.Reader, out *os.File) error {
 
 		sb.WriteString(fields[0])
 		sb.WriteByte(',')
-		sb.WriteString(time.Unix(int64(ts/1000), 0).Format("2006-01-02 15:04:05"))
+		sb.WriteString(time.Unix(int64(ts/1000), 0).Format(defaultLayout))
 		sb.WriteByte(',')
 		sb.WriteString(pair)
 		sb.WriteByte(',')

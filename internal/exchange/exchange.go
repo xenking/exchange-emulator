@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"github.com/xenking/bytebufferpool"
 
 	"github.com/phuslu/log"
 	"github.com/xenking/decimal"
@@ -23,15 +24,17 @@ type Client struct {
 	orderConn *ws.UserConn
 	priceConn *ws.UserConn
 
-	commission    decimal.Decimal
-	actions       chan Action
+	commission decimal.Decimal
+	actions    chan Action
+	shutdown   chan struct{}
+
 	cancel        context.CancelFunc
 	cancelHandler func(state parser.ExchangeState)
 }
 
 type Action func(parser.ExchangeState)
 
-func New(parentCtx context.Context, config *config.Config) (*Client, error) {
+func New(parentCtx context.Context, config *config.Config, logger *log.Logger) (*Client, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 
 	p, err := parser.New(ctx, config.Parser)
@@ -42,18 +45,25 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 	}
 
 	b := balance.New()
+	b.SetLogger(logger)
 	go b.Start(ctx)
 
 	o := order.New()
+	o.SetLogger(logger)
 	go o.Start(ctx)
+
+	commission := decimal.NewFromFloat(config.Exchange.Commission).Shift(-2)
+	commission = one.Sub(commission)
 
 	ex := &Client{
 		Parser:     p,
 		Balance:    b,
 		Order:      o,
+		Log:        logger,
 		actions:    make(chan Action, 1024),
+		shutdown:   make(chan struct{}),
 		cancel:     cancel,
-		commission: decimal.NewFromFloat(config.Exchange.Commission),
+		commission: commission,
 	}
 
 	go ex.Start(ctx)
@@ -61,7 +71,12 @@ func New(parentCtx context.Context, config *config.Config) (*Client, error) {
 	return ex, err
 }
 
+func (c *Client) Shutdown() <-chan struct{} {
+	return c.shutdown
+}
+
 func (c *Client) Start(ctx context.Context) {
+	defer close(c.actions)
 	defer c.Close()
 
 	states := c.Parser.ExchangeStates()
@@ -128,7 +143,7 @@ func (c *Client) Start(ctx context.Context) {
 
 			c.Log.Trace().Int64("ts", state.Unix).Msg("exchange state")
 
-			if err := c.priceConn.Send(state); err != nil {
+			if err := c.sendPriceUpdate(&state); err != nil {
 				c.Log.Error().Err(err).Str("user", c.priceConn.ID).Msg("can't send price state")
 				continue
 			}
@@ -151,11 +166,12 @@ func (c *Client) Start(ctx context.Context) {
 						o.Side == api.OrderSide_SELL && o.Price.GreaterThan(state.High) {
 						continue
 					}
-					if o.Total.GreaterThan(state.AssetVolume) {
-						c.Log.Panic().Str("side", o.Side.String()).Str("total", o.Total.String()).
-							Str("asset", state.AssetVolume.String()).
-							Int64("ts", state.Unix).Msg("can't close order in one kline. Need to use PARTIAL_FILLED")
-					}
+					// TODO: skip for now because it's never happens before
+					//if o.Total.GreaterThan(state.AssetVolume) {
+					//	c.Log.Panic().Str("side", o.Side.String()).Str("total", o.Total.String()).
+					//		Str("asset", state.AssetVolume.String()).
+					//		Int64("ts", state.Unix).Msg("can't close order in one kline. Need to use PARTIAL_FILLED")
+					//}
 
 					o.Status = api.OrderStatus_FILLED
 
@@ -170,7 +186,7 @@ func (c *Client) Start(ctx context.Context) {
 
 					deletedOrders = append(deletedOrders, o.Id)
 
-					if err := c.orderConn.Send(o.Order); err != nil {
+					if err := c.orderConn.SendJSON(o.Order); err != nil {
 						c.Log.Error().Err(err).Str("user", c.orderConn.ID).Str("order", o.Id).Msg("can't send order update")
 						continue
 					}
@@ -187,6 +203,16 @@ func (c *Client) Start(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (c *Client) sendPriceUpdate(state *parser.ExchangeState) error {
+	buf := bytebufferpool.GetLen(90)
+	buf.B = buf.B[:0]
+	buf.B = state.AppendMarshalJSON(buf.B)
+	err := c.priceConn.Send(buf.B)
+	bytebufferpool.Put(buf)
+
+	return err
 }
 
 func (c *Client) SetOrdersConnection(conn *ws.UserConn) {
@@ -215,15 +241,9 @@ func (c *Client) SetCancelHandler(handler func(state parser.ExchangeState)) {
 	}
 }
 
-func (c *Client) SetLogger(log *log.Logger) {
-	c.Log = log
-	c.Order.SetLogger(log)
-	c.Balance.SetLogger(log)
-}
-
 func (c *Client) Close() {
 	c.cancel()
-	close(c.actions)
+	close(c.shutdown)
 	c.orderConn.Close()
 	c.priceConn.Close()
 }
@@ -326,9 +346,17 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 				Str("order", o.Id).Str("status", o.Status.String()).Msg("balance update started 2")
 			switch o.GetSide() {
 			case api.OrderSide_BUY:
-				asset.Free = asset.Free.Add(o.Quantity.Mul(c.commission.Div(percent).Neg().Add(one)))
+				if c.commission.IsZero() {
+					asset.Free = asset.Free.Add(o.Quantity)
+				} else {
+					asset.Free = asset.Free.Add(o.Quantity.Mul(c.commission))
+				}
 			case api.OrderSide_SELL:
-				asset.Free = asset.Free.Add(o.Total.Mul(c.commission.Div(percent).Neg().Add(one)))
+				if c.commission.IsZero() {
+					asset.Free = asset.Free.Add(o.Total)
+				} else {
+					asset.Free = asset.Free.Add(o.Total.Mul(c.commission))
+				}
 			}
 
 			if asset.Free.IsNegative() || asset.Locked.IsNegative() {

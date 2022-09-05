@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/goccy/go-json"
 	"github.com/phuslu/log"
-	"github.com/segmentio/encoding/json"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
