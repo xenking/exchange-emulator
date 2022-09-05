@@ -2,9 +2,9 @@ package exchange
 
 import (
 	"context"
-	"github.com/xenking/bytebufferpool"
 
 	"github.com/phuslu/log"
+	"github.com/xenking/bytebufferpool"
 	"github.com/xenking/decimal"
 
 	"github.com/xenking/exchange-emulator/config"

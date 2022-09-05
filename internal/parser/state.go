@@ -2,6 +2,7 @@ package parser
 
 import (
 	"github.com/xenking/decimal"
+
 	"github.com/xenking/exchange-emulator/pkg/utils"
 )
 

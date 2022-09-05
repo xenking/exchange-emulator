@@ -2,10 +2,11 @@ package app
 
 import (
 	"context"
+	"time"
+
 	"github.com/cornelk/hashmap"
 	"github.com/go-faster/errors"
 	"github.com/phuslu/log"
-	"time"
 
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/internal/exchange"
