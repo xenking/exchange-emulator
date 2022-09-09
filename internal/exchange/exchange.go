@@ -2,6 +2,7 @@ package exchange
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/phuslu/log"
 	"github.com/xenking/bytebufferpool"
@@ -16,33 +17,24 @@ import (
 )
 
 type Client struct {
-	Parser  *parser.Listener
-	Balance *balance.Tracker
-	Order   *order.Tracker
-	Log     *log.Logger
-
-	orderConn *ws.UserConn
-	priceConn *ws.UserConn
-
-	commission decimal.Decimal
-	actions    chan Action
-	shutdown   chan struct{}
-
+	Parser        *parser.Listener
+	Balance       *balance.Tracker
+	Order         *order.Tracker
+	Log           *log.Logger
+	orderConn     *ws.UserConn
+	priceConn     *ws.UserConn
+	actions       chan Action
+	shutdown      chan struct{}
 	cancel        context.CancelFunc
 	cancelHandler func(state parser.ExchangeState)
+	commission    decimal.Decimal
+	closed        int32
 }
 
 type Action func(parser.ExchangeState)
 
-func New(parentCtx context.Context, config *config.Config, logger *log.Logger) (*Client, error) {
+func New(parentCtx context.Context, config *config.Config, listener *parser.Listener, logger *log.Logger) *Client {
 	ctx, cancel := context.WithCancel(parentCtx)
-
-	p, err := parser.New(ctx, config.Parser)
-	if err != nil {
-		cancel()
-
-		return nil, err
-	}
 
 	b := balance.New()
 	b.SetLogger(logger)
@@ -56,7 +48,7 @@ func New(parentCtx context.Context, config *config.Config, logger *log.Logger) (
 	commission = one.Sub(commission)
 
 	ex := &Client{
-		Parser:     p,
+		Parser:     listener,
 		Balance:    b,
 		Order:      o,
 		Log:        logger,
@@ -68,7 +60,7 @@ func New(parentCtx context.Context, config *config.Config, logger *log.Logger) (
 
 	go ex.Start(ctx)
 
-	return ex, err
+	return ex
 }
 
 func (c *Client) Shutdown() <-chan struct{} {
@@ -77,6 +69,7 @@ func (c *Client) Shutdown() <-chan struct{} {
 
 func (c *Client) Start(ctx context.Context) {
 	defer close(c.actions)
+	defer close(c.shutdown)
 	defer c.Close()
 
 	states := c.Parser.ExchangeStates()
@@ -94,10 +87,10 @@ func (c *Client) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-c.orderConn.CloseHandler():
+		case <-c.orderConn.Shutdown():
 			c.Log.Warn().Msg("orders connection closed")
 			return
-		case <-c.priceConn.CloseHandler():
+		case <-c.priceConn.Shutdown():
 			c.Log.Warn().Msg("prices connection closed")
 			return
 		case <-c.Order.Control():
@@ -143,7 +136,7 @@ func (c *Client) Start(ctx context.Context) {
 
 			c.Log.Trace().Int64("ts", state.Unix).Msg("exchange state")
 
-			if err := c.sendPriceUpdate(&state); err != nil {
+			if err := c.priceConn.Send(state.Raw); err != nil {
 				c.Log.Error().Err(err).Str("user", c.priceConn.ID).Msg("can't send price state")
 				continue
 			}
@@ -186,7 +179,12 @@ func (c *Client) Start(ctx context.Context) {
 
 					deletedOrders = append(deletedOrders, o.Id)
 
-					if err := c.orderConn.SendJSON(o.Order); err != nil {
+					buf := bytebufferpool.GetLen(29)
+					buf.B = buf.B[:0]
+					buf.B = o.AppendEncoded(buf.B)
+					err := c.orderConn.Send(buf.B)
+					bytebufferpool.Put(buf)
+					if err != nil {
 						c.Log.Error().Err(err).Str("user", c.orderConn.ID).Str("order", o.Id).Msg("can't send order update")
 						continue
 					}
@@ -205,16 +203,6 @@ func (c *Client) Start(ctx context.Context) {
 	}
 }
 
-func (c *Client) sendPriceUpdate(state *parser.ExchangeState) error {
-	buf := bytebufferpool.GetLen(90)
-	buf.B = buf.B[:0]
-	buf.B = state.AppendMarshalJSON(buf.B)
-	err := c.priceConn.Send(buf.B)
-	bytebufferpool.Put(buf)
-
-	return err
-}
-
 func (c *Client) SetOrdersConnection(conn *ws.UserConn) {
 	c.actions <- func(state parser.ExchangeState) {
 		if c.orderConn != nil {
@@ -222,6 +210,7 @@ func (c *Client) SetOrdersConnection(conn *ws.UserConn) {
 		}
 
 		c.orderConn = conn
+		go c.listenWSClose(conn)
 	}
 }
 
@@ -232,6 +221,7 @@ func (c *Client) SetPricesConnection(conn *ws.UserConn) {
 		}
 
 		c.priceConn = conn
+		go c.listenWSClose(conn)
 	}
 }
 
@@ -242,10 +232,12 @@ func (c *Client) SetCancelHandler(handler func(state parser.ExchangeState)) {
 }
 
 func (c *Client) Close() {
-	c.cancel()
-	close(c.shutdown)
-	c.orderConn.Close()
-	c.priceConn.Close()
+	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+		c.cancel()
+		c.Parser.Close()
+		c.orderConn.Close()
+		c.priceConn.Close()
+	}
 }
 
 func (c *Client) NewAction(ctx context.Context, action Action) {
@@ -261,10 +253,7 @@ func (c *Client) NewAction(ctx context.Context, action Action) {
 	<-done
 }
 
-var (
-	one     = decimal.NewFromInt(1)
-	percent = decimal.NewFromInt(100)
-)
+var one = decimal.NewFromInt(1)
 
 // UpdateBalance updates user balance for order
 // pair USDT ETH
@@ -379,4 +368,14 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	}
 
 	return nil
+}
+
+func (c *Client) listenWSClose(conn *ws.UserConn) {
+	select {
+	case <-c.shutdown:
+	case <-conn.Shutdown():
+	}
+
+	c.Close()
+	return
 }

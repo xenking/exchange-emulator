@@ -64,7 +64,7 @@ func (s *Server) CloseConn(conn *websocket.Conn, err error) {
 	}
 	s.conns.Del(id)
 
-	close(userConn.close)
+	userConn.Close()
 
 	log.Info().Uint64("id", conn.ID()).Str("user", id).Msg("Close conn")
 }
@@ -103,26 +103,24 @@ func (s *Server) OnData(conn *websocket.Conn, _ bool, data []byte) {
 	conn.SetUserValue("init", true)
 	conn.SetUserValue("user", init.UserID)
 
-	enc := json.NewEncoder(conn)
-	enc.SetEscapeHTML(false)
-	uc := &UserConn{
-		conn:  conn,
-		ID:    init.UserID,
-		enc:   enc,
-		close: make(chan struct{}),
-	}
-	s.conns.Set(init.UserID, uc)
-	s.users <- uc
-
 	init.Initialized = true
 	log.Info().Uint64("id", conn.ID()).Str("user", init.UserID).Msg("Init conn")
 
-	err = enc.Encode(init)
+	err = json.NewEncoder(conn).Encode(init)
 	if err != nil {
 		_, _ = conn.Write(NewError(err).Bytes())
 
 		return
 	}
+
+	uc := &UserConn{
+		conn:   conn,
+		ID:     init.UserID,
+		close:  make(chan struct{}),
+		closed: 0,
+	}
+	s.conns.Set(init.UserID, uc)
+	s.users <- uc
 }
 
 type Error struct {

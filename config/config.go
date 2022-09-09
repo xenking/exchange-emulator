@@ -12,14 +12,13 @@ var ApplicationVersion string
 
 // Config is a structure for values of the environment variables.
 type Config struct {
+	App                   ApplicationConfig
+	WS                    WSConfig
+	GRPC                  GRPCConfig
+	Exchange              ExchangeConfig
+	Parser                ParserConfig
+	Log                   LoggerConfig
 	GracefulShutdownDelay time.Duration `default:"30s"`
-
-	App      ApplicationConfig
-	Exchange ExchangeConfig
-	Parser   ParserConfig
-	Log      LoggerConfig
-	WS       WSConfig
-	GRPC     GRPCConfig
 }
 
 type ApplicationConfig struct {
@@ -45,14 +44,14 @@ type GRPCConfig struct {
 
 type LoggerConfig struct {
 	Level          string `default:"debug"`
-	DisableConsole bool   `default:"false"`
 	WithCaller     int    `default:"1"`
+	DisableConsole bool   `default:"false"`
 }
 
 type ParserConfig struct {
-	File   string
-	Delay  time.Duration `default:"3ms"`
-	Offset int64         `default:"0"`
+	File          string
+	ListenerDelay time.Duration `default:"3ms"`
+	Offset        int64         `default:"0"`
 }
 
 // NewConfig loads values from environment variables and returns loaded configuration.

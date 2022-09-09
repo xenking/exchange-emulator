@@ -61,6 +61,8 @@ func (c *Client) ReplaceOrder(ctx context.Context, userID string, cancelID strin
 		resp *api.Order
 	)
 	c.NewAction(ctx, func(state parser.ExchangeState) {
+		c.Log.Debug().Str("cancelID", cancelID).Msg("replacing order")
+
 		cancel := c.Order.Cancel(cancelID)
 		if cancel != nil {
 			err = c.UpdateBalance(cancel)
@@ -186,7 +188,7 @@ func (c *Client) CancelOrders(ctx context.Context, orderIDs []string) error {
 	var err error
 	c.NewAction(ctx, func(state parser.ExchangeState) {
 		for _, orderID := range orderIDs {
-			c.Log.Trace().Str("id", orderID).Msg("cancelling order")
+			c.Log.Debug().Str("id", orderID).Msg("cancelling order")
 
 			o := c.Order.Cancel(orderID)
 			if o == nil {

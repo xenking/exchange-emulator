@@ -1,83 +1,45 @@
 package parser
 
 import (
-	"context"
 	"time"
 
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/pkg/fastcsv"
 )
 
-type Listener struct {
-	data <-chan ExchangeState
-	errc chan error
+type Parser struct {
+	data  []ExchangeState
+	delay time.Duration
 }
 
-func (p *Listener) ExchangeStates() <-chan ExchangeState {
-	return p.data
+func New(cfg config.ParserConfig) (*Parser, error) {
+	p := &Parser{
+		delay: cfg.ListenerDelay,
+	}
+	err := p.start(cfg.File, cfg.Offset)
+	return p, err
 }
 
-func (p *Listener) Errors() <-chan error {
-	return p.errc
-}
+func (p *Parser) start(file string, offset int64) error {
+	row := &exchangeState{}
+	reader, err := fastcsv.NewFileReader(file, ',', row)
+	if err != nil {
+		return err
+	}
 
-func New(ctx context.Context, cfg config.ParserConfig) (*Listener, error) {
-	data, errc := parser(ctx, cfg.File, cfg.Delay, cfg.Offset)
+	defer reader.Close()
 
-	return &Listener{
-		data: data,
-		errc: errc,
-	}, nil
-}
-
-// TODO: use this decimal library https://github.com/db47h/decimal/tree/math
-// OR THIS https://github.com/ericlagergren/decimal (need to fork)
-func parser(ctx context.Context, file string, delay time.Duration, offset int64) (<-chan ExchangeState, chan error) {
-	states := make(chan ExchangeState)
-	errc := make(chan error)
-
-	go func(ctx context.Context) {
-		defer close(states)
-		defer close(errc)
-
-		row := &exchangeState{}
-		reader, err := fastcsv.NewFileReader(file, ',', row)
-		if err != nil {
-			errc <- err
-			return
+	var line ExchangeState
+	for reader.Scan() {
+		line = row.Parse()
+		if line.Unix < offset {
+			continue
 		}
 
-		defer reader.Close()
+		line.Raw = make([]byte, 0, 15)
+		line.Raw = line.AppendEncoded(line.Raw)
+		p.data = append(p.data, line)
+	}
 
-		first := ExchangeState{}
-		for reader.Scan() {
-
-			first = row.Parse()
-			if first.Unix >= offset {
-				break
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case states <- first:
-		}
-
-		ticker := time.NewTicker(delay)
-		defer ticker.Stop()
-		for range ticker.C {
-			// check for EOF condition
-			if !reader.Scan() {
-				return
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case states <- row.Parse():
-			}
-		}
-	}(ctx)
-
-	return states, errc
+	return nil
 }

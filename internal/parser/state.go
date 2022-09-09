@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"encoding/binary"
+
 	"github.com/xenking/decimal"
 
 	"github.com/xenking/exchange-emulator/pkg/utils"
@@ -14,6 +16,7 @@ type ExchangeState struct {
 	High  decimal.Decimal `json:"high"`
 	Low   decimal.Decimal `json:"low"`
 	Close decimal.Decimal `json:"close"`
+	Raw   []byte          `json:"-"`
 	Unix  int64           `json:"unix"`
 }
 
@@ -26,20 +29,28 @@ func (e ExchangeState) MarshalJSON() ([]byte, error) {
 func (e ExchangeState) AppendMarshalJSON(b []byte) []byte {
 	// {"open":"3690.57","high":"3691.03","low":"3688.00","close":"3690.09","unix":1640995440000}
 	b = append(b, `{"open":"`...)
-	b = utils.AppendDecimal(b, e.Open.CoefficientInt64(), int(e.Open.Exponent()))
+	b = utils.AppendDecimal(b, e.Open)
 	b = appendZeroExponent(b, e.Open.Exponent())
 	b = append(b, `","high":"`...)
-	b = utils.AppendDecimal(b, e.High.CoefficientInt64(), int(e.High.Exponent()))
+	b = utils.AppendDecimal(b, e.High)
 	b = appendZeroExponent(b, e.High.Exponent())
 	b = append(b, `","low":"`...)
-	b = utils.AppendDecimal(b, e.Low.CoefficientInt64(), int(e.Low.Exponent()))
+	b = utils.AppendDecimal(b, e.Low)
 	b = appendZeroExponent(b, e.Low.Exponent())
 	b = append(b, `","close":"`...)
-	b = utils.AppendDecimal(b, e.Close.CoefficientInt64(), int(e.Close.Exponent()))
+	b = utils.AppendDecimal(b, e.Close)
 	b = appendZeroExponent(b, e.Close.Exponent())
 	b = append(b, `","unix":`...)
-	b = utils.AppendUint(b, e.Unix)
+	b = binary.BigEndian.AppendUint64(b, uint64(e.Unix))
 	b = append(b, '}')
+	return b
+}
+
+func (e ExchangeState) AppendEncoded(b []byte) []byte {
+	// 3690.09|1640995440000 == 15 raw bytes
+	b = binary.BigEndian.AppendUint64(b, uint64(e.Unix))
+	b = utils.AppendDecimal(b, e.Close)
+	b = appendZeroExponent(b, e.Close.Exponent())
 	return b
 }
 
@@ -66,9 +77,9 @@ type exchangeState struct {
 func (s *exchangeState) Parse() ExchangeState {
 	e := ExchangeState{}
 	e.Unix, _ = utils.ParseUintBytes(s.Unix)
-	e.Open, _ = decimal.NewFromString(utils.B2S(s.Open[:len(s.Open)-6]))
-	e.High, _ = decimal.NewFromString(utils.B2S(s.High[:len(s.High)-6]))
-	e.Low, _ = decimal.NewFromString(utils.B2S(s.Low[:len(s.Low)-6]))
-	e.Close, _ = decimal.NewFromString(utils.B2S(s.Close[:len(s.Close)-6]))
+	e.Open, _ = utils.ParseDecimalBytes(s.Open[:len(s.Open)-6])
+	e.High, _ = utils.ParseDecimalBytes(s.High[:len(s.High)-6])
+	e.Low, _ = utils.ParseDecimalBytes(s.Low[:len(s.Low)-6])
+	e.Close, _ = utils.ParseDecimalBytes(s.Close[:len(s.Close)-6])
 	return e
 }

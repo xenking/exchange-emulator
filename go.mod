@@ -11,6 +11,7 @@ require (
 	github.com/goccy/go-json v0.9.11
 	github.com/phuslu/log v1.0.81
 	github.com/valyala/fasthttp v1.39.0
+	github.com/xenking/bytebufferpool v1.1.0
 	github.com/xenking/decimal v1.3.5
 	github.com/xenking/websocket v1.0.1
 	google.golang.org/genproto v0.0.0-20220902135211-223410557253
@@ -24,7 +25,6 @@ require (
 	github.com/klauspost/compress v1.15.9 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/xenking/bytebufferpool v1.1.0 // indirect
 	golang.org/x/net v0.0.0-20220826154423-83b083e8dc8b // indirect
 	golang.org/x/sys v0.0.0-20220829200755-d48e67d00261 // indirect
 	golang.org/x/text v0.3.7 // indirect

@@ -12,8 +12,8 @@ type FileReader struct {
 	file      *os.File
 	data      []byte
 	current   []byte
-	separator byte
 	dest      []reflect.Value
+	separator byte
 }
 
 func NewFileReader(filename string, separator byte, dest interface{}) (*FileReader, error) {

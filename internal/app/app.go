@@ -10,11 +10,13 @@ import (
 
 	"github.com/xenking/exchange-emulator/config"
 	"github.com/xenking/exchange-emulator/internal/exchange"
+	"github.com/xenking/exchange-emulator/internal/parser"
 	"github.com/xenking/exchange-emulator/internal/ws"
 	"github.com/xenking/exchange-emulator/pkg/logger"
 )
 
 type App struct {
+	parser   *parser.Parser
 	config   *config.Config
 	orders   <-chan *ws.UserConn
 	prices   <-chan *ws.UserConn
@@ -23,7 +25,10 @@ type App struct {
 }
 
 func New(orders, prices <-chan *ws.UserConn, cfg *config.Config) (*App, error) {
+	p, err := parser.New(cfg.Parser)
+
 	app := &App{
+		parser:   p,
 		config:   cfg,
 		orders:   orders,
 		prices:   prices,
@@ -31,7 +36,7 @@ func New(orders, prices <-chan *ws.UserConn, cfg *config.Config) (*App, error) {
 		clients:  hashmap.New[string, *exchange.Client](),
 	}
 
-	return app, nil
+	return app, err
 }
 
 func (a *App) Start(ctx context.Context) {
@@ -74,13 +79,11 @@ func (a *App) GetClient(userID string) (*Client, error) {
 func (a *App) GetOrCreateClient(ctx context.Context, userID string) (*Client, error) {
 	client, ok := a.clients.Get(userID)
 	if !ok {
-		var err error
-		client, err = exchange.New(ctx, a.config, logger.NewUser(userID))
+		listener, err := a.parser.NewListener(ctx)
 		if err != nil {
-			log.Error().Err(err).Msg("create client")
-
-			return nil, err
+			return nil, errors.Wrap(err, "create price listener")
 		}
+		client = exchange.New(ctx, a.config, listener, logger.NewUser(userID))
 
 		log.Debug().Str("user", userID).Msg("new exchange client")
 		a.clients.Set(userID, client)

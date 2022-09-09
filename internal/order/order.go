@@ -2,6 +2,7 @@ package order
 
 import (
 	"context"
+	"encoding/binary"
 	"strings"
 
 	"github.com/go-faster/errors"
@@ -13,18 +14,25 @@ import (
 
 type Order struct {
 	*api.Order
-
 	Price           decimal.Decimal
 	Total           decimal.Decimal
 	Quantity        decimal.Decimal
 	internalOrderID uint64
 }
 
+func (o *Order) AppendEncoded(b []byte) []byte {
+	// 1641025800005|2|ccb6ulcf285m9jis89c0 = 29 raw bytes
+	b = binary.BigEndian.AppendUint64(b, uint64(o.Order.TransactTime))
+	b = append(b, byte(o.Order.Status))
+	b = append(b, o.Order.Id...)
+	return b
+}
+
 type Tracker struct {
 	transactions chan transaction
 	signal       chan struct{}
-	active       []*Order
 	log          *log.Logger
+	active       []*Order
 }
 
 func New() *Tracker {
