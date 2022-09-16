@@ -6,56 +6,51 @@ import (
 )
 
 type Listener struct {
-	states <-chan ExchangeState
-	close  context.CancelFunc
+	states chan ExchangeState
+	data   []ExchangeState
+	delay  time.Duration
 }
 
-func (p *Listener) ExchangeStates() <-chan ExchangeState {
-	return p.states
+func (p *Parser) NewListener() *Listener {
+	return &Listener{
+		states: make(chan ExchangeState),
+		data:   p.data,
+		delay:  p.delay,
+	}
 }
 
-func (p *Listener) Close() {
-	p.close()
-}
+func (l *Listener) Start(ctx context.Context) {
+	defer close(l.states)
 
-func (p *Parser) NewListener(gCtx context.Context) (*Listener, error) {
-	states := make(chan ExchangeState)
-	ctx, cancel := context.WithCancel(gCtx)
+	idx := 0
+	last := len(l.data) - 1
 
-	go func(ctx context.Context) {
-		defer close(states)
+	select {
+	case <-ctx.Done():
+		return
+	case l.states <- l.data[idx]:
+		idx++
+	}
 
-		idx := 0
-		last := len(p.data) - 1
+	ticker := time.NewTicker(l.delay)
+	defer ticker.Stop()
+	for range ticker.C {
+		// check for EOF condition
+		if idx == last {
+			return
+		}
 
 		select {
 		case <-ctx.Done():
 			return
-		case states <- p.data[idx]:
+		case l.states <- l.data[idx]:
 			idx++
 		}
+	}
+}
 
-		ticker := time.NewTicker(p.delay)
-		defer ticker.Stop()
-		for range ticker.C {
-			// check for EOF condition
-			if idx == last {
-				return
-			}
-
-			select {
-			case <-ctx.Done():
-				return
-			case states <- p.data[idx]:
-				idx++
-			}
-		}
-	}(ctx)
-
-	return &Listener{
-		states: states,
-		close:  cancel,
-	}, nil
+func (l *Listener) ExchangeStates() <-chan ExchangeState {
+	return l.states
 }
 
 // TODO: use this decimal library https://github.com/db47h/decimal/tree/math

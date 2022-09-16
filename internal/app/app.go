@@ -79,10 +79,8 @@ func (a *App) GetClient(userID string) (*Client, error) {
 func (a *App) GetOrCreateClient(ctx context.Context, userID string) (*Client, error) {
 	client, ok := a.clients.Get(userID)
 	if !ok {
-		listener, err := a.parser.NewListener(ctx)
-		if err != nil {
-			return nil, errors.Wrap(err, "create price listener")
-		}
+
+		listener := a.parser.NewListener()
 		client = exchange.New(ctx, a.config, listener, logger.NewUser(userID))
 
 		log.Debug().Str("user", userID).Msg("new exchange client")

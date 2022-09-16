@@ -76,6 +76,10 @@ func (s *Server) StartExchange(stream api.Multiplex_StartExchangeServer) error {
 			return status.Errorf(codes.Unavailable, "can't receive request: %v", err)
 		}
 
+		if client.IsClosed() {
+			return status.Error(codes.Aborted, "client is closed")
+		}
+
 		resp := &api.Response{}
 		var appErr error
 		switch req := r.GetRequest().(type) {

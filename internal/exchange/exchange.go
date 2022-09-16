@@ -36,6 +36,8 @@ type Action func(parser.ExchangeState)
 func New(parentCtx context.Context, config *config.Config, listener *parser.Listener, logger *log.Logger) *Client {
 	ctx, cancel := context.WithCancel(parentCtx)
 
+	go listener.Start(ctx)
+
 	b := balance.New()
 	b.SetLogger(logger)
 	go b.Start(ctx)
@@ -68,8 +70,6 @@ func (c *Client) Shutdown() <-chan struct{} {
 }
 
 func (c *Client) Start(ctx context.Context) {
-	defer close(c.actions)
-	defer close(c.shutdown)
 	defer c.Close()
 
 	states := c.Parser.ExchangeStates()
@@ -86,12 +86,6 @@ func (c *Client) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-c.orderConn.Shutdown():
-			c.Log.Warn().Msg("orders connection closed")
-			return
-		case <-c.priceConn.Shutdown():
-			c.Log.Warn().Msg("prices connection closed")
 			return
 		case <-c.Order.Control():
 			if currentStates != nil {
@@ -234,9 +228,10 @@ func (c *Client) SetCancelHandler(handler func(state parser.ExchangeState)) {
 func (c *Client) Close() {
 	if atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
 		c.cancel()
-		c.Parser.Close()
 		c.orderConn.Close()
 		c.priceConn.Close()
+		close(c.shutdown)
+		close(c.actions)
 	}
 }
 
@@ -368,6 +363,10 @@ func (c *Client) UpdateBalance(o *order.Order) error {
 	}
 
 	return nil
+}
+
+func (c *Client) IsClosed() bool {
+	return atomic.LoadInt32(&c.closed) == 1
 }
 
 func (c *Client) listenWSClose(conn *ws.UserConn) {

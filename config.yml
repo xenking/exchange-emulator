@@ -2,7 +2,8 @@ app:
   version: 0.1.0
 
 log:
-  level: trace
+  level: debug
+  file: logs/out.log
 
 ws:
   orders_addr: ":8182"

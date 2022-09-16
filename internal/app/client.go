@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-
 	"github.com/xenking/decimal"
 
 	"github.com/xenking/exchange-emulator/gen/proto/api"

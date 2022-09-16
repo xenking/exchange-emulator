@@ -44,6 +44,7 @@ type GRPCConfig struct {
 
 type LoggerConfig struct {
 	Level          string `default:"debug"`
+	File           string `default:"service.log"`
 	WithCaller     int    `default:"1"`
 	DisableConsole bool   `default:"false"`
 }

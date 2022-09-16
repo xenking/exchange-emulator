@@ -28,7 +28,7 @@ func New(cfg *config.LoggerConfig) *log.Logger {
 	}
 
 	fw := &log.FileWriter{
-		Filename:   "out.log",
+		Filename:   cfg.File,
 		TimeFormat: log.TimeFormatUnixMs,
 	}
 

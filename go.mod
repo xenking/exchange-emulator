@@ -10,10 +10,10 @@ require (
 	github.com/go-faster/errors v0.6.1
 	github.com/goccy/go-json v0.9.11
 	github.com/phuslu/log v1.0.81
-	github.com/valyala/fasthttp v1.39.0
+	github.com/valyala/fasthttp v1.40.0
 	github.com/xenking/bytebufferpool v1.1.0
 	github.com/xenking/decimal v1.3.5
-	github.com/xenking/websocket v1.0.1
+	github.com/xenking/websocket v1.0.2
 	google.golang.org/genproto v0.0.0-20220902135211-223410557253
 	google.golang.org/grpc v1.49.0
 	google.golang.org/protobuf v1.28.1
